@@ -1,8 +1,8 @@
 use crate::{
-    cairo::ext_py::{
-        types::{FeeEstimate, FunctionInvocation, TransactionSimulation, TransactionTrace},
-        CallFailure,
+    cairo::ext_py::types::{
+        FeeEstimate, FunctionInvocation, TransactionSimulation, TransactionTrace,
     },
+    cairo::starknet_rs::CallError,
     context::RpcContext,
     v02::{
         method::call::FunctionCall,
@@ -10,12 +10,12 @@ use crate::{
     },
 };
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use pathfinder_common::{BlockId, CallParam, EntryPoint};
 use serde::{Deserialize, Serialize};
 use stark_hash::Felt;
 
-use super::common::prepare_handle_and_block;
+use super::common::prepare_block;
 
 #[derive(Deserialize, Debug)]
 pub struct SimulateTrasactionInput {
@@ -35,16 +35,12 @@ crate::error::generate_rpc_error_subset!(
     ContractError
 );
 
-impl From<CallFailure> for SimulateTransactionError {
-    fn from(value: CallFailure) -> Self {
+impl From<CallError> for SimulateTransactionError {
+    fn from(value: CallError) -> Self {
         match value {
-            CallFailure::NoSuchBlock => Self::BlockNotFound,
-            CallFailure::NoSuchContract => Self::ContractNotFound,
-            CallFailure::InvalidEntryPoint => Self::ContractError,
-            CallFailure::ExecutionFailed(e) => Self::Internal(anyhow!("Execution failed: {e}")),
-            CallFailure::Internal(_) | CallFailure::Shutdown => {
-                Self::Internal(anyhow!("Internal error"))
-            }
+            CallError::ContractNotFound => Self::ContractNotFound,
+            CallError::InvalidMessageSelector => Self::ContractError,
+            CallError::Internal(e) => Self::Internal(e),
         }
     }
 }
@@ -53,24 +49,55 @@ pub async fn simulate_transaction(
     context: RpcContext,
     input: SimulateTrasactionInput,
 ) -> Result<SimulateTransactionOutput, SimulateTransactionError> {
-    let (handle, gas_price, at_block, pending_timestamp, pending_update) =
-        prepare_handle_and_block(&context, input.block_id).await?;
+    let (gas_price, at_block, _pending_timestamp, _pending_update) =
+        prepare_block(&context, input.block_id).await?;
+
+    let storage = context.storage.clone();
+    let span = tracing::Span::current();
+
+    // FIXME: handle pending data
+    let block = tokio::task::spawn_blocking(move || {
+        let _g = span.enter();
+
+        let mut db = storage.connection()?;
+        let tx = db.transaction().context("Creating database transaction")?;
+
+        let block = tx
+            .block_header(at_block.into())
+            .context("Reading block")?
+            .ok_or_else(|| SimulateTransactionError::BlockNotFound)?;
+
+        Ok::<_, SimulateTransactionError>(block)
+    })
+    .await
+    .context("Getting block")??;
+
+    let gas_price = match gas_price {
+        crate::cairo::ext_py::GasPriceSource::PastBlock => block.gas_price.0.into(),
+        crate::cairo::ext_py::GasPriceSource::Current(c) => c,
+    };
 
     let skip_validate = input
         .simulation_flags
         .0
         .iter()
         .any(|flag| flag == &dto::SimulationFlag::SkipValidate);
-    let txs = handle
-        .simulate_transaction(
-            at_block,
+
+    let txs = tokio::task::spawn_blocking(move || {
+        crate::cairo::starknet_rs::simulate(
+            context.storage,
+            context.chain_id,
+            block.number,
+            block.timestamp,
+            block.sequencer_address,
+            Some(block.number),
             gas_price,
-            pending_update,
-            pending_timestamp,
             input.transactions,
             skip_validate,
         )
-        .await?;
+    })
+    .await
+    .context("Simulating transaction")??;
 
     let txs: Result<Vec<dto::SimulatedTransaction>, SimulateTransactionError> =
         txs.into_iter().map(map_tx).collect();
@@ -321,7 +348,7 @@ mod tests {
 
     use pathfinder_common::macro_prelude::*;
     use pathfinder_common::{
-        felt, BlockHash, BlockHeader, BlockNumber, BlockTimestamp, Chain, GasPrice,
+        felt, BlockHash, BlockHeader, BlockNumber, BlockTimestamp, GasPrice, StateUpdate,
         TransactionVersion,
     };
     use pathfinder_storage::{JournalMode, Storage};
@@ -353,34 +380,38 @@ mod tests {
                 .expect("insert class");
 
             let header = BlockHeader::builder()
-                .with_number(BlockNumber::GENESIS + 1)
+                .with_number(BlockNumber::GENESIS)
+                .with_timestamp(BlockTimestamp::new_or_panic(0))
+                .finalize_with_hash(BlockHash(felt!("0xb00")));
+            tx.insert_block_header(&header).unwrap();
+
+            let block1_number = BlockNumber::GENESIS + 1;
+            let block1_hash = BlockHash(felt!("0xb01"));
+
+            let header = BlockHeader::builder()
+                .with_number(block1_number)
                 .with_timestamp(BlockTimestamp::new_or_panic(1))
                 .with_gas_price(GasPrice(1))
-                .finalize_with_hash(BlockHash::ZERO);
-
+                .finalize_with_hash(block1_hash);
             tx.insert_block_header(&header).unwrap();
+
+            let state_update = StateUpdate::default()
+                .with_block_hash(block1_hash)
+                .with_declared_cairo_class(DUMMY_ACCOUNT_CLASS_HASH);
+            tx.insert_state_update(block1_number, &state_update)
+                .unwrap();
+
             tx.commit().unwrap();
         }
 
-        let (call_handle, _join_handle) = crate::cairo::ext_py::start(
-            storage.path().into(),
-            std::num::NonZeroUsize::try_from(1).unwrap(),
-            futures::future::pending(),
-            Chain::Testnet,
-        )
-        .await
-        .unwrap();
-
-        let rpc = RpcContext::for_tests()
-            .with_storage(storage)
-            .with_call_handling(call_handle);
+        let rpc = RpcContext::for_tests().with_storage(storage);
 
         let input_json = serde_json::json!({
             "block_id": {"block_number": 1},
             "transaction": [
                 {
                     "contract_address_salt": "0x46c0d4abf0192a788aca261e58d7031576f7d8ea5229f452b0f23e691dd5971",
-                    "max_fee": "0x0",
+                    "max_fee": "0x100000000000",
                     "signature": [
                         "0x296ab4b0b7cb0c6929c4fb1e04b782511dffb049f72a90efe5d53f0515eab88",
                         "0x4e80d8bb98a9baf47f6f0459c2329a5401538576e76436acaf5f56c573c7d77"
@@ -404,14 +435,13 @@ mod tests {
 
         let expected: Vec<dto::SimulatedTransaction> = {
             use dto::*;
-            use primitive_types::H256;
             vec![
             SimulatedTransaction {
                 fee_estimation: Some(
                     FeeEstimate {
-                        gas_consumed: H256::from_low_u64_be(0x0c19),
-                        gas_price: H256::from_low_u64_be(0x01),
-                        overall_fee: H256::from_low_u64_be(0x0c19),
+                        gas_consumed: 1236.into(),
+                        gas_price: 1.into(),
+                        overall_fee: 1236.into(),
                     }
                 ),
                 transaction_trace: Some(

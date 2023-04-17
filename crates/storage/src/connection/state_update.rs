@@ -406,6 +406,7 @@ mod tests {
     use pathfinder_common::macro_prelude::*;
     use pathfinder_common::BlockHeader;
 
+    use super::super::class::{compiled_class_definition_at, compiled_class_hash_at};
     use super::*;
 
     #[test]
@@ -524,11 +525,8 @@ mod tests {
                 ClassHash(sierra_hash.0),
             )
             .with_declared_cairo_class(cairo_hash2)
-            .with_declared_sierra_class(
-                sierra_hash_bytes!(b"sierra hash"),
-                casm_hash_bytes!(b"casm hash"),
-            )
-            .with_contract_nonce(contract_address, contract_nonce_bytes!(b"nonce"))
+            .with_declared_sierra_class(sierra_hash, casm_hash)
+            .with_contract_nonce(contract_address, ContractNonce(felt_bytes!(b"nonce")))
             .with_replaced_class(contract_address, ClassHash(sierra_hash.0));
 
         tx.insert_block_header(&header).unwrap();
@@ -540,6 +538,19 @@ mod tests {
             .unwrap();
         assert_eq!(result, state_update);
 
+        // check getters for compiled class
+        let hash = compiled_class_hash_at(&tx, BlockId::Latest, ClassHash(sierra_hash.0))
+            .unwrap()
+            .unwrap();
+        assert_eq!(hash, casm_hash);
+
+        let definition =
+            compiled_class_definition_at(&tx, BlockId::Latest, ClassHash(sierra_hash.0))
+                .unwrap()
+                .unwrap();
+        assert_eq!(definition, b"casm definition");
+
+        // non-existent state update
         let non_existent = super::state_update(&tx, (header.number + 1).into()).unwrap();
         assert_eq!(non_existent, None);
     }

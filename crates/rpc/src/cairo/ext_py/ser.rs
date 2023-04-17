@@ -27,8 +27,8 @@ pub(crate) enum ChildCommand<'a> {
         common: CommonProperties<'a>,
 
         // zero means use the gas price from the block.
-        #[serde_as(as = "&pathfinder_serde::H256AsHexStr")]
-        gas_price: &'a primitive_types::H256,
+        #[serde_as(as = "&pathfinder_serde::U256AsHexStr")]
+        gas_price: &'a primitive_types::U256,
         transactions: &'a [TransactionAndClassHashHint],
     },
     EstimateMsgFee {
@@ -36,8 +36,8 @@ pub(crate) enum ChildCommand<'a> {
         common: CommonProperties<'a>,
 
         // zero means use the gas price from the block.
-        #[serde_as(as = "&pathfinder_serde::H256AsHexStr")]
-        gas_price: &'a primitive_types::H256,
+        #[serde_as(as = "&pathfinder_serde::U256AsHexStr")]
+        gas_price: &'a primitive_types::U256,
 
         sender_address: EthereumAddress,
         contract_address: &'a ContractAddress,
@@ -49,8 +49,8 @@ pub(crate) enum ChildCommand<'a> {
         common: CommonProperties<'a>,
 
         // zero means use the gas price from the block.
-        #[serde_as(as = "&pathfinder_serde::H256AsHexStr")]
-        gas_price: &'a primitive_types::H256,
+        #[serde_as(as = "&pathfinder_serde::U256AsHexStr")]
+        gas_price: &'a primitive_types::U256,
         transactions: &'a [TransactionAndClassHashHint],
         skip_validate: &'a bool,
     },
@@ -252,6 +252,16 @@ impl Display for BlockHashNumberOrLatest {
             BlockHashNumberOrLatest::Hash(h) => f.write_fmt(format_args!("Hash({h})")),
             BlockHashNumberOrLatest::Number(n) => f.write_fmt(format_args!("Number({n})")),
             BlockHashNumberOrLatest::Latest => f.write_str("latest"),
+        }
+    }
+}
+
+impl From<BlockHashNumberOrLatest> for pathfinder_storage::BlockId {
+    fn from(value: BlockHashNumberOrLatest) -> Self {
+        match value {
+            BlockHashNumberOrLatest::Hash(h) => Self::Hash(h),
+            BlockHashNumberOrLatest::Number(n) => Self::Number(n),
+            BlockHashNumberOrLatest::Latest => Self::Latest,
         }
     }
 }

@@ -1,6 +1,12 @@
+use std::sync::Arc;
+
+use crate::context::RpcContext;
 use crate::felt::RpcFelt;
-use crate::{context::RpcContext, v03::method::common::base_block_and_pending_for_call};
-use pathfinder_common::{BlockId, CallParam, CallResultValue, ContractAddress, EntryPoint};
+use anyhow::Context;
+use pathfinder_common::{
+    BlockId, BlockTimestamp, CallParam, CallResultValue, ContractAddress, EntryPoint, StateUpdate,
+};
+use starknet_gateway_types::pending::PendingData;
 
 crate::error::generate_rpc_error_subset!(
     CallError: BlockNotFound,
@@ -10,16 +16,24 @@ crate::error::generate_rpc_error_subset!(
     ContractError
 );
 
-impl From<crate::cairo::ext_py::CallFailure> for CallError {
-    fn from(c: crate::cairo::ext_py::CallFailure) -> Self {
-        use crate::cairo::ext_py::CallFailure::*;
-        match c {
-            NoSuchBlock => Self::BlockNotFound,
-            NoSuchContract => Self::ContractNotFound,
-            InvalidEntryPoint => Self::InvalidMessageSelector,
-            ExecutionFailed(e) => Self::Internal(anyhow::anyhow!("Internal error: {}", e)),
-            // Intentionally hide the message under Internal
-            Internal(_) | Shutdown => Self::Internal(anyhow::anyhow!("Internal error")),
+impl From<starknet_in_rust::transaction::error::TransactionError> for CallError {
+    fn from(value: starknet_in_rust::transaction::error::TransactionError) -> Self {
+        use starknet_in_rust::transaction::error::TransactionError;
+        match value {
+            TransactionError::EntryPointNotFound => Self::InvalidMessageSelector,
+            TransactionError::FailToReadClassHash => Self::ContractNotFound,
+            e => Self::Internal(anyhow::anyhow!("Internal error: {}", e)),
+        }
+    }
+}
+
+impl From<crate::cairo::starknet_rs::CallError> for CallError {
+    fn from(value: crate::cairo::starknet_rs::CallError) -> Self {
+        use crate::cairo::starknet_rs::CallError::*;
+        match value {
+            ContractNotFound => Self::ContractNotFound,
+            InvalidMessageSelector => Self::InvalidMessageSelector,
+            Internal(e) => Self::Internal(e),
         }
     }
 }
@@ -55,28 +69,94 @@ impl From<FunctionCall> for crate::v02::types::request::Call {
 }
 
 #[serde_with::serde_as]
-#[derive(serde::Serialize, Debug)]
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
 pub struct CallOutput(#[serde_as(as = "Vec<RpcFelt>")] Vec<CallResultValue>);
 
 pub async fn call(context: RpcContext, input: CallInput) -> Result<CallOutput, CallError> {
-    let handle = context
-        .call_handle
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("Unsupported configuration"))?;
-
-    let (when, pending_timestamp, pending_update) =
+    let (block_id, pending_timestamp, pending_update) =
         base_block_and_pending_for_call(input.block_id, &context.pending_data).await?;
 
-    let result = handle
-        .call(
-            input.request.into(),
-            when,
-            pending_update,
-            pending_timestamp,
-        )
-        .await?;
+    let storage = context.storage.clone();
+    let span = tracing::Span::current();
 
-    Ok(CallOutput(result))
+    // FIXME: handle pending data
+    let result = tokio::task::spawn_blocking(move || {
+        let _g = span.enter();
+
+        let mut db = storage.connection()?;
+        let tx = db.transaction().context("Creating database transaction")?;
+
+        let block = tx
+            .block_header(block_id)
+            .context("Reading block")?
+            .ok_or_else(|| CallError::BlockNotFound)?;
+
+        let timestamp = pending_timestamp.unwrap_or(block.timestamp);
+
+        let result = crate::cairo::starknet_rs::call(
+            context.storage,
+            context.chain_id,
+            block.number,
+            timestamp,
+            block.sequencer_address,
+            Some(block.number),
+            input.request.contract_address,
+            input.request.entry_point_selector,
+            input.request.calldata,
+            pending_update,
+        )?;
+
+        Ok(result)
+    })
+    .await
+    .context("Executing call")?;
+
+    result.map(CallOutput)
+}
+
+/// Transforms pending requests into latest + optional pending data to apply.
+pub(super) async fn base_block_and_pending_for_call(
+    at_block: BlockId,
+    pending_data: &Option<PendingData>,
+) -> Result<
+    (
+        pathfinder_storage::BlockId,
+        Option<BlockTimestamp>,
+        Option<Arc<StateUpdate>>,
+    ),
+    anyhow::Error,
+> {
+    match at_block {
+        BlockId::Pending => {
+            // we must have pending_data configured for pending requests, otherwise we fail
+            // fast.
+            match pending_data {
+                Some(pending) => {
+                    // call on this particular parent block hash; if it's not found at query time over
+                    // at python, it should fall back to latest and **disregard** the pending data.
+                    let pending_on_top_of_a_block = pending
+                        .state_update_on_parent_block()
+                        .await
+                        .map(|(parent_block, timestamp, data)| {
+                            (parent_block.into(), Some(timestamp), Some(data))
+                        });
+
+                    // if there is no pending data available, just execute on whatever latest.
+                    Ok(pending_on_top_of_a_block.unwrap_or((
+                        pathfinder_storage::BlockId::Latest,
+                        None,
+                        None,
+                    )))
+                }
+                None => Err(anyhow::anyhow!(
+                    "Pending data not supported in this configuration"
+                )),
+            }
+        }
+        BlockId::Number(n) => Ok((pathfinder_storage::BlockId::Number(n), None, None)),
+        BlockId::Hash(h) => Ok((pathfinder_storage::BlockId::Hash(h), None, None)),
+        BlockId::Latest => Ok((pathfinder_storage::BlockId::Latest, None, None)),
+    }
 }
 
 #[cfg(test)]
@@ -130,7 +210,96 @@ mod tests {
         }
     }
 
-    mod ext_py {
+    mod in_memory {
+        use std::sync::Arc;
+
+        use super::*;
+
+        use pathfinder_common::{
+            felt, BlockHash, BlockHeader, BlockNumber, BlockTimestamp, Chain, ChainId,
+            ContractAddress, GasPrice, StateUpdate, StorageAddress, StorageValue,
+        };
+        use pathfinder_storage::Storage;
+        use starknet_gateway_test_fixtures::class_definitions::{
+            CONTRACT_DEFINITION, CONTRACT_DEFINITION_CLASS_HASH,
+        };
+
+        async fn test_context() -> (RpcContext, ContractAddress, StorageAddress, StorageValue) {
+            let storage = Storage::in_memory().unwrap();
+            let mut db = storage.connection().unwrap();
+            let tx = db.transaction().unwrap();
+
+            // Empty genesis block
+            let header = BlockHeader::builder()
+                .with_number(BlockNumber::GENESIS)
+                .with_timestamp(BlockTimestamp::new_or_panic(0))
+                .finalize_with_hash(BlockHash(felt!("0xb00")));
+            tx.insert_block_header(&header).unwrap();
+
+            // Declare & deploy two classes: a dummy account (does no signature verification)
+            // and a test class providing an entry point reading from storage
+            let block1_number = BlockNumber::GENESIS + 1;
+            let block1_hash = BlockHash(felt!("0xb01"));
+
+            tx.insert_cairo_class(CONTRACT_DEFINITION_CLASS_HASH, CONTRACT_DEFINITION)
+                .unwrap();
+
+            let header = BlockHeader::builder()
+                .with_number(block1_number)
+                .with_timestamp(BlockTimestamp::new_or_panic(1))
+                .with_gas_price(GasPrice(1))
+                .finalize_with_hash(block1_hash);
+            tx.insert_block_header(&header).unwrap();
+
+            let test_contract_address = ContractAddress::new_or_panic(felt!("0xc01"));
+            let test_contract_key = StorageAddress::new_or_panic(felt!("0x123"));
+            let test_contract_value = StorageValue(felt!("0x3"));
+
+            let state_update = StateUpdate::default()
+                .with_block_hash(block1_hash)
+                .with_declared_cairo_class(CONTRACT_DEFINITION_CLASS_HASH)
+                .with_deployed_contract(test_contract_address, CONTRACT_DEFINITION_CLASS_HASH)
+                .with_storage_update(
+                    test_contract_address,
+                    test_contract_key,
+                    test_contract_value,
+                );
+            tx.insert_state_update(block1_number, &state_update)
+                .unwrap();
+
+            tx.commit().unwrap();
+
+            let sync_state = Arc::new(crate::SyncState::default());
+            let sequencer = starknet_gateway_client::Client::new(Chain::Mainnet).unwrap();
+
+            let context = RpcContext::new(storage, sync_state, ChainId::MAINNET, sequencer);
+
+            (
+                context,
+                test_contract_address,
+                test_contract_key,
+                test_contract_value,
+            )
+        }
+
+        #[tokio::test]
+        async fn storage_access() {
+            let (context, contract_address, test_key, test_value) = test_context().await;
+
+            let input = CallInput {
+                request: FunctionCall {
+                    contract_address: contract_address,
+                    entry_point_selector: EntryPoint::hashed(b"get_value"),
+                    calldata: vec![CallParam(*test_key.get())],
+                },
+                block_id: BlockId::Number(BlockNumber::new_or_panic(1)),
+            };
+            let result = call(context, input).await.unwrap();
+            assert_eq!(result, CallOutput(vec![CallResultValue(test_value.0)]));
+        }
+    }
+
+    mod mainnet {
         use super::*;
         use pathfinder_common::Chain;
         use pathfinder_storage::JournalMode;
@@ -159,8 +328,7 @@ mod tests {
             }
         }
 
-        async fn test_context_with_call_handling(
-        ) -> (tempfile::TempDir, RpcContext, tokio::task::JoinHandle<()>) {
+        async fn test_context() -> (tempfile::TempDir, RpcContext) {
             use pathfinder_common::ChainId;
 
             let mut source_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -174,31 +342,19 @@ mod tests {
 
             let storage = pathfinder_storage::Storage::migrate(db_path, JournalMode::WAL)
                 .unwrap()
-                .create_pool(NonZeroU32::new(1).unwrap())
+                .create_pool(NonZeroU32::new(10).unwrap())
                 .unwrap();
             let sync_state = Arc::new(crate::SyncState::default());
-            let (call_handle, cairo_handle) = crate::cairo::ext_py::start(
-                storage.path().into(),
-                std::num::NonZeroUsize::try_from(2).unwrap(),
-                futures::future::pending(),
-                Chain::Mainnet,
-            )
-            .await
-            .unwrap();
 
             let sequencer = starknet_gateway_client::Client::new(Chain::Mainnet).unwrap();
 
             let context = RpcContext::new(storage, sync_state, ChainId::MAINNET, sequencer);
-            (
-                db_dir,
-                context.with_call_handling(call_handle),
-                cairo_handle,
-            )
+            (db_dir, context)
         }
 
         #[tokio::test]
         async fn no_such_block() {
-            let (_temp_dir, context, _join_handle) = test_context_with_call_handling().await;
+            let (_temp_dir, context) = test_context().await;
 
             let input = CallInput {
                 request: valid_mainnet_call(),
@@ -210,7 +366,7 @@ mod tests {
 
         #[tokio::test]
         async fn no_such_contract() {
-            let (_temp_dir, context, _join_handle) = test_context_with_call_handling().await;
+            let (_temp_dir, context) = test_context().await;
 
             let input = CallInput {
                 request: FunctionCall {
@@ -225,7 +381,7 @@ mod tests {
 
         #[tokio::test]
         async fn invalid_message_selector() {
-            let (_temp_dir, context, _join_handle) = test_context_with_call_handling().await;
+            let (_temp_dir, context) = test_context().await;
 
             let input = CallInput {
                 request: FunctionCall {
@@ -240,7 +396,7 @@ mod tests {
 
         #[tokio::test]
         async fn successful_call() {
-            let (_temp_dir, context, _join_handle) = test_context_with_call_handling().await;
+            let (_temp_dir, context) = test_context().await;
 
             let input = CallInput {
                 request: valid_mainnet_call(),

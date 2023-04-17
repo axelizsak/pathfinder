@@ -17,28 +17,19 @@ pub(crate) mod common {
     use starknet_gateway_types::pending::PendingData;
 
     use crate::{
-        cairo::ext_py::{BlockHashNumberOrLatest, GasPriceSource, Handle},
+        cairo::ext_py::{BlockHashNumberOrLatest, GasPriceSource},
         context::RpcContext,
     };
 
-    pub async fn prepare_handle_and_block(
+    pub async fn prepare_block(
         context: &RpcContext,
         block_id: BlockId,
-    ) -> Result<
-        (
-            &Handle,
-            GasPriceSource,
-            BlockHashNumberOrLatest,
-            Option<BlockTimestamp>,
-            Option<Arc<StateUpdate>>,
-        ),
-        anyhow::Error,
-    > {
-        let handle = context
-            .call_handle
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Unsupported configuration"))?;
-
+    ) -> anyhow::Result<(
+        GasPriceSource,
+        BlockHashNumberOrLatest,
+        Option<BlockTimestamp>,
+        Option<Arc<StateUpdate>>,
+    )> {
         // discussed during estimateFee work: when user is requesting using block_hash use the
         // gasPrice from the starknet_blocks::gas_price column, otherwise (tags) get the latest
         // eth_gasPrice.
@@ -63,7 +54,7 @@ pub(crate) mod common {
         let (when, pending_timestamp, pending_update) =
             base_block_and_pending_for_call(block_id, &context.pending_data).await?;
 
-        Ok((handle, gas_price, when, pending_timestamp, pending_update))
+        Ok((gas_price, when, pending_timestamp, pending_update))
     }
 
     /// Transforms the request to call or estimate fee at some point in time to the type expected
