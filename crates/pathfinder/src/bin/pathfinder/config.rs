@@ -133,6 +133,15 @@ Examples:
         default_value = "1024"
     )]
     max_rpc_connections: std::num::NonZeroU32,
+
+    #[arg(
+        short = 'b',
+        long = "p2p.bootstrap",
+        long_help = "Configure as P2P bootstrap node",
+        default_value = "false",
+        hide = true
+    )]
+    p2p_boot: bool,
 }
 
 #[derive(clap::Args)]
@@ -279,6 +288,7 @@ pub struct Config {
     pub python_subprocesses: std::num::NonZeroUsize,
     pub sqlite_wal: JournalMode,
     pub max_rpc_connections: std::num::NonZeroU32,
+    pub p2p_boot: bool,
 }
 
 pub struct WebSocket {
@@ -371,6 +381,7 @@ impl Config {
                 false => JournalMode::Rollback,
             },
             max_rpc_connections: cli.max_rpc_connections,
+            p2p_boot: cli.p2p_boot,
         }
     }
 }

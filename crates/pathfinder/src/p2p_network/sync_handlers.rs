@@ -109,6 +109,8 @@ fn get_next_block_number(
     }
 }
 
+// TODO rework to iterate over all types of requests (headers, bodies, state diffs)
+// unfortunately cannot cover classes (ie cairo0/sierra)
 #[cfg(test)]
 mod tests {
     use super::proto::sync::Direction;
