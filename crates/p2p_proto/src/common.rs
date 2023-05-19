@@ -120,7 +120,7 @@ pub struct L1HandlerTransaction {
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::DeclareTransaction")]
 pub struct DeclareTransaction {
-    pub contract_class: ContractClass,
+    pub contract_class_hash: Felt,
     pub sender_address: Felt,
     pub signature: Vec<Felt>,
     pub max_fee: Felt,
@@ -145,7 +145,7 @@ pub struct DeployAccountTransaction {
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::DeployTransaction")]
 pub struct DeployTransaction {
-    pub contract_class: ContractClass,
+    pub contract_class_hash: Felt,
     pub contract_address_salt: Felt,
     pub constructor_calldata: Vec<Felt>,
     pub version: Felt,

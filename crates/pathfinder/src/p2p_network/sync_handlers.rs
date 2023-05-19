@@ -5,6 +5,7 @@ use pathfinder_storage::{StarknetBlocksBlockId, StarknetTransactionsTable, Stora
 use stark_hash::Felt;
 
 const MAX_HEADERS_COUNT: u64 = 1000;
+const MAX_BODIES_COUNT: u64 = 100;
 
 // TODO: we currently ignore the size limit.
 pub async fn get_block_headers(
@@ -94,6 +95,212 @@ fn fetch_block_headers(
     }
 
     Ok(headers)
+}
+
+// TODO: we currently ignore the size limit.
+pub async fn get_block_bodies(
+    request: p2p_proto::sync::GetBlockBodies,
+    storage: &Storage,
+) -> anyhow::Result<p2p_proto::sync::BlockBodies> {
+    let storage = storage.clone();
+    let span = tracing::Span::current();
+
+    tokio::task::spawn_blocking(move || {
+        let _g = span.enter();
+        let mut connection = storage
+            .connection()
+            .context("Opening database connection")?;
+        let tx = connection
+            .transaction()
+            .context("Creating database transaction")?;
+
+        let block_bodies = fetch_block_bodies(tx, request)?;
+
+        Ok(p2p_proto::sync::BlockBodies { block_bodies })
+    })
+    .await
+    .context("Database read panic or shutting down")?
+}
+
+fn fetch_block_bodies(
+    tx: rusqlite::Transaction<'_>,
+    request: p2p_proto::sync::GetBlockBodies,
+) -> anyhow::Result<Vec<p2p_proto::common::BlockBody>> {
+    use pathfinder_storage::StarknetBlocksTable;
+
+    let mut count = std::cmp::min(request.count, MAX_BODIES_COUNT);
+    let mut bodies = Vec::new();
+
+    let mut next_block_number =
+        StarknetBlocksTable::get_number(&tx, BlockHash(request.start_block))?;
+
+    while let Some(block_number) = next_block_number {
+        if count == 0 {
+            break;
+        }
+
+        let transactions_and_receipts =
+            StarknetTransactionsTable::get_transaction_data_for_block(&tx, block_number.into())?;
+
+        if transactions_and_receipts.is_empty() {
+            // no such block in our database, stop iterating
+            break;
+        }
+
+        let (transactions, receipts) = transactions_and_receipts
+            .into_iter()
+            .map(|tr| body::from_gw(tr))
+            .unzip();
+
+        bodies.push(p2p_proto::common::BlockBody {
+            transactions,
+            receipts,
+        });
+
+        count -= 1;
+        next_block_number = get_next_block_number(block_number, request.direction);
+    }
+
+    Ok(bodies)
+}
+
+mod body {
+    use p2p_proto::common::{
+        CommonTransactionReceiptProperties, DeclareTransaction, DeclareTransactionReceipt,
+        DeployAccountTransaction, DeployAccountTransactionReceipt, DeployTransaction,
+        DeployTransactionReceipt, Event, InvokeTransaction, InvokeTransactionReceipt, MessageToL1,
+        Receipt, Transaction,
+    };
+    use pathfinder_common::{EntryPoint, Fee, TransactionNonce};
+    use stark_hash::Felt;
+    use starknet_gateway_types::reply::transaction as gw;
+
+    pub(super) fn from_gw((gw_t, gw_r): (gw::Transaction, gw::Receipt)) -> (Transaction, Receipt) {
+        let common = CommonTransactionReceiptProperties {
+            transaction_hash: gw_t.hash().0,
+            // TODO What if the fee is missing?
+            actual_fee: gw_r.actual_fee.unwrap_or(Fee::ZERO).0,
+            messages_sent: gw_r
+                .l2_to_l1_messages
+                .into_iter()
+                .map(|m| MessageToL1 {
+                    from_address: *m.from_address.get(),
+                    payload: m.payload.into_iter().map(|x| x.0).collect(),
+                    to_address: m.to_address.0,
+                })
+                .collect(),
+            events: gw_r
+                .events
+                .into_iter()
+                .map(|e| Event {
+                    from_address: *e.from_address.get(),
+                    keys: e.keys.into_iter().map(|k| k.0).collect(),
+                    data: e.data.into_iter().map(|d| d.0).collect(),
+                })
+                .collect(),
+        };
+
+        let version =
+            Felt::from_be_slice(gw_t.version().0.as_bytes()).expect("Version fits into felt");
+
+        match gw_t {
+            gw::Transaction::Declare(
+                gw::DeclareTransaction::V0(t) | gw::DeclareTransaction::V1(t),
+            ) => {
+                let r = Receipt::Declare(DeclareTransactionReceipt { common });
+                let t = Transaction::Declare(DeclareTransaction {
+                    contract_class_hash: t.class_hash.0,
+                    sender_address: *t.sender_address.get(),
+                    signature: t.signature.into_iter().map(|x| x.0).collect(),
+                    max_fee: t.max_fee.0,
+                    nonce: t.nonce.0,
+                    version,
+                });
+                (t, r)
+            }
+            gw::Transaction::Declare(gw::DeclareTransaction::V2(t)) => {
+                let r = Receipt::Declare(DeclareTransactionReceipt { common });
+                let t = Transaction::Declare(DeclareTransaction {
+                    contract_class_hash: t.class_hash.0,
+                    sender_address: *t.sender_address.get(),
+                    signature: t.signature.into_iter().map(|x| x.0).collect(),
+                    max_fee: t.max_fee.0,
+                    nonce: t.nonce.0,
+                    version,
+                });
+                (t, r)
+            }
+            gw::Transaction::Deploy(t) => {
+                let r = Receipt::Deploy(DeployTransactionReceipt {
+                    common,
+                    contract_address: *t.contract_address.get(),
+                });
+                let t = Transaction::Deploy(DeployTransaction {
+                    contract_class_hash: t.class_hash.0,
+                    contract_address_salt: t.contract_address_salt.0,
+                    constructor_calldata: t.constructor_calldata.into_iter().map(|x| x.0).collect(),
+                    version,
+                });
+                (t, r)
+            }
+            gw::Transaction::DeployAccount(t) => {
+                let r = Receipt::DeployAccount(DeployAccountTransactionReceipt {
+                    common,
+                    contract_address: *t.contract_address.get(),
+                });
+                let t = Transaction::DeployAccount(DeployAccountTransaction {
+                    class_hash: t.class_hash.0,
+                    contract_address_salt: t.contract_address_salt.0,
+                    constructor_calldata: t.constructor_calldata.into_iter().map(|x| x.0).collect(),
+                    max_fee: t.max_fee.0,
+                    nonce: t.nonce.0,
+                    signature: t.signature.into_iter().map(|x| x.0).collect(),
+                    version,
+                });
+                (t, r)
+            }
+            gw::Transaction::Invoke(gw::InvokeTransaction::V0(t)) => {
+                let r = Receipt::Invoke(InvokeTransactionReceipt { common });
+                let t = Transaction::Invoke(InvokeTransaction {
+                    contract_address: *t.sender_address.get(),
+                    entry_point_selector: t.entry_point_selector.0,
+                    calldata: t.calldata.into_iter().map(|x| x.0).collect(),
+                    signature: t.signature.into_iter().map(|x| x.0).collect(),
+                    max_fee: t.max_fee.0,
+                    // FIXME
+                    nonce: TransactionNonce::ZERO.0,
+                    version,
+                });
+                (t, r)
+            }
+            gw::Transaction::Invoke(gw::InvokeTransaction::V1(t)) => {
+                let r = Receipt::Invoke(InvokeTransactionReceipt { common });
+                let t = Transaction::Invoke(InvokeTransaction {
+                    contract_address: *t.sender_address.get(),
+                    // FIXME
+                    entry_point_selector: EntryPoint::ZERO.0,
+                    calldata: t.calldata.into_iter().map(|x| x.0).collect(),
+                    signature: t.signature.into_iter().map(|x| x.0).collect(),
+                    max_fee: t.max_fee.0,
+                    nonce: t.nonce.0,
+                    version,
+                });
+                (t, r)
+            }
+            gw::Transaction::L1Handler(t) => {
+                let r =
+                    Receipt::L1Handler(p2p_proto::common::L1HandlerTransactionReceipt { common });
+                let t = Transaction::L1Handler(p2p_proto::common::L1HandlerTransaction {
+                    contract_address: *t.contract_address.get(),
+                    entry_point_selector: t.entry_point_selector.0,
+                    calldata: t.calldata.into_iter().map(|x| x.0).collect(),
+                    nonce: t.nonce.0,
+                    version,
+                });
+                (t, r)
+            }
+        }
+    }
 }
 
 /// Returns next block number considering direction.

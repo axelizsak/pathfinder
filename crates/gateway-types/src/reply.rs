@@ -412,6 +412,19 @@ pub mod transaction {
                 Transaction::L1Handler(t) => t.contract_address,
             }
         }
+
+        pub fn version(&self) -> TransactionVersion {
+            match self {
+                Transaction::Declare(DeclareTransaction::V0(_)) => TransactionVersion::ZERO,
+                Transaction::Declare(DeclareTransaction::V1(_)) => TransactionVersion::ONE,
+                Transaction::Declare(DeclareTransaction::V2(_)) => TransactionVersion::TWO,
+                Transaction::Deploy(t) => t.version,
+                Transaction::DeployAccount(t) => t.version,
+                Transaction::Invoke(InvokeTransaction::V0(_)) => TransactionVersion::ZERO,
+                Transaction::Invoke(InvokeTransaction::V1(_)) => TransactionVersion::ONE,
+                Transaction::L1Handler(t) => t.version,
+            }
+        }
     }
 
     #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -468,6 +481,14 @@ pub mod transaction {
                 DeclareTransaction::V0(tx) => tx.signature.as_ref(),
                 DeclareTransaction::V1(tx) => tx.signature.as_ref(),
                 DeclareTransaction::V2(tx) => tx.signature.as_ref(),
+            }
+        }
+
+        pub fn version(&self) -> TransactionVersion {
+            match self {
+                DeclareTransaction::V0(_) => TransactionVersion::ZERO,
+                DeclareTransaction::V1(_) => TransactionVersion::ONE,
+                DeclareTransaction::V2(_) => TransactionVersion::TWO,
             }
         }
     }

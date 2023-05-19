@@ -112,8 +112,8 @@ async fn handle_p2p_event(
                 Request::GetBlockHeaders(r) => {
                     Response::BlockHeaders(sync_handlers::get_block_headers(r, storage).await?)
                 }
-                Request::GetBlockBodies(_r) => {
-                    unimplemented!()
+                Request::GetBlockBodies(r) => {
+                    Response::BlockBodies(sync_handlers::get_block_bodies(r, storage).await?)
                 }
                 Request::GetStateDiffs(_r) => Response::StateDiffs(StateDiffs {
                     block_state_updates: vec![],

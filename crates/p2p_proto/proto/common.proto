@@ -35,7 +35,11 @@ message InvokeTransaction {
 }
 
 message DeclareTransaction {
-  ContractClass contract_class = 1;
+  // TODO These can get pretty big, imo it would be better to
+  // ask peers for particular classes in a separate type
+  // ofquery
+  // ContractClass contract_class = 1;
+  FieldElement contract_class_hash = 1;
   FieldElement sender_address = 2;
   FieldElement max_fee = 3;
   repeated FieldElement signature = 4;
@@ -44,7 +48,9 @@ message DeclareTransaction {
 }
 
 message DeployTransaction {
-  ContractClass contract_class = 1;
+  // TODO Doesn't make sense
+  // ContractClass contract_class = 1;
+  FieldElement contract_class_hash = 1;
   FieldElement contract_address_salt = 2;
   repeated FieldElement constructor_calldata = 3;
   FieldElement version = 4;
@@ -68,6 +74,7 @@ message DeployAccountTransaction {
   FieldElement version = 7;
 }
 
+// TODO update me
 message ContractClass {
   message EntryPoint {
     FieldElement selector = 1;
