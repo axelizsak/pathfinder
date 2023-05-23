@@ -1,11 +1,14 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Context};
 use p2p_proto as proto;
-use pathfinder_common::{BlockHash, BlockNumber};
+use pathfinder_common::{BlockHash, BlockNumber, TransactionNonce};
 use pathfinder_storage::{StarknetBlocksBlockId, StarknetTransactionsTable, Storage};
 use stark_hash::Felt;
 
 const MAX_HEADERS_COUNT: u64 = 1000;
 const MAX_BODIES_COUNT: u64 = 100;
+const MAX_STATE_UPDATES_COUNT: u64 = 100;
 
 // TODO: we currently ignore the size limit.
 pub async fn get_block_headers(
@@ -162,6 +165,277 @@ fn fetch_block_bodies(
     }
 
     Ok(bodies)
+}
+
+// TODO: we currently ignore the size limit.
+pub async fn get_state_updates(
+    request: p2p_proto::sync::GetStateDiffs,
+    storage: &Storage,
+) -> anyhow::Result<p2p_proto::sync::StateDiffs> {
+    let storage = storage.clone();
+    let span = tracing::Span::current();
+
+    tokio::task::spawn_blocking(move || {
+        let _g = span.enter();
+        let mut connection = storage
+            .connection()
+            .context("Opening database connection")?;
+        let tx = connection
+            .transaction()
+            .context("Creating database transaction")?;
+
+        let block_state_updates = fetch_block_state_updates(tx, request)?;
+
+        Ok(p2p_proto::sync::StateDiffs {
+            block_state_updates,
+        })
+    })
+    .await
+    .context("Database read panic or shutting down")?
+}
+
+fn fetch_block_state_updates(
+    tx: rusqlite::Transaction<'_>,
+    request: p2p_proto::sync::GetStateDiffs,
+) -> anyhow::Result<Vec<p2p_proto::sync::BlockStateUpdateWithHash>> {
+    use pathfinder_storage::StarknetBlocksTable;
+    // use pathfinder_storage::;
+
+    let mut count = std::cmp::min(request.count, MAX_STATE_UPDATES_COUNT);
+    let mut state_updates = Vec::new();
+
+    let mut next_block_number =
+        StarknetBlocksTable::get_number(&tx, BlockHash(request.start_block))?;
+
+    while let Some(block_number) = next_block_number {
+        if count == 0 {
+            break;
+        }
+
+        let block_hash = match StarknetBlocksTable::get_hash(&tx, block_number.into())? {
+            Some(block_hash) => block_hash,
+            // No such block found
+            None => break,
+        };
+
+        let state_update = get_state_update_from_storage(&tx, block_number)?;
+        state_updates.push(p2p_proto::sync::BlockStateUpdateWithHash {
+            block_hash: block_hash.0,
+            state_update,
+        });
+
+        count -= 1;
+        next_block_number = get_next_block_number(block_number, request.direction);
+    }
+
+    Ok(state_updates)
+}
+
+// Copied from rpc/v03/get_state_update
+fn get_state_update_from_storage(
+    tx: &rusqlite::Transaction<'_>,
+    number: BlockNumber,
+) -> anyhow::Result<p2p_proto::propagation::BlockStateUpdate> {
+    use p2p_proto::propagation::{
+        ContractDiff, DeclaredClass as DeclaredSierraClass, DeployedContract, ReplacedClass,
+        StorageDiff,
+    };
+    use pathfinder_common::{CasmHash, ClassHash, ContractAddress, StorageAddress, StorageValue};
+
+    let mut stmt = tx
+        .prepare_cached("SELECT contract_address, nonce FROM nonce_updates WHERE block_number = ?")
+        .context("Preparing nonce update query statement")?;
+    let nonces = stmt
+        .query_map([number], |row| {
+            let contract_address = row.get(0)?;
+            let nonce = row.get(1)?;
+
+            Ok((contract_address, nonce))
+        })
+        .context("Querying nonce updates")?
+        .collect::<Result<HashMap<ContractAddress, TransactionNonce>, _>>()
+        .context("Iterating over nonce query rows")?;
+
+    let mut stmt = tx
+        .prepare_cached(
+            "SELECT contract_address, storage_address, storage_value FROM storage_updates WHERE block_number = ?"
+        )
+        .context("Preparing storage update query statement")?;
+    let storage_tuples = stmt
+        .query_map([number], |row| {
+            let contract_address: ContractAddress = row.get(0)?;
+            let storage_address: StorageAddress = row.get(1)?;
+            let storage_value: StorageValue = row.get(2)?;
+
+            Ok((contract_address, storage_address, storage_value))
+        })
+        .context("Querying storage updates")?
+        .collect::<Result<Vec<_>, _>>()
+        .context("Iterating over storage query rows")?;
+    // Convert storage tuples to contract based mapping.
+    let mut storage_diffs: HashMap<ContractAddress, Vec<StorageDiff>> = HashMap::new();
+    for (addr, key, value) in storage_tuples {
+        storage_diffs.entry(addr).or_default().push(StorageDiff {
+            key: *key.get(),
+            value: value.0,
+        });
+    }
+
+    let mut stmt = tx
+        .prepare_cached(
+            r"SELECT
+                class_definitions.hash AS class_hash,
+                casm_definitions.compiled_class_hash AS compiled_class_hash
+            FROM
+                class_definitions
+            LEFT OUTER JOIN
+                casm_definitions ON casm_definitions.hash = class_definitions.hash
+            WHERE
+                class_definitions.block_number = ?",
+        )
+        .context("Preparing class declaration query statement")?;
+    enum DeclaredClass {
+        Deprecated(ClassHash),
+        Sierra(DeclaredSierraClass),
+    }
+    let declared_classes = stmt
+        .query_map([number], |row| {
+            let class_hash: ClassHash = row.get(0)?;
+            let compiled_class_hash: Option<CasmHash> = row.get(1)?;
+
+            Ok(match compiled_class_hash {
+                Some(compiled_class_hash) => DeclaredClass::Sierra(DeclaredSierraClass {
+                    contract_class_hash: class_hash.0,
+                    compiled_class_hash: compiled_class_hash.0,
+                }),
+                None => DeclaredClass::Deprecated(class_hash),
+            })
+        })
+        .context("Querying class declarations")?
+        .collect::<Result<Vec<_>, _>>()
+        .context("Iterating over class declaration query rows")?;
+    let (deprecated_declared_classes, declared_classes): (Vec<_>, Vec<_>) = declared_classes
+        .into_iter()
+        .partition(|c| matches!(c, DeclaredClass::Deprecated(_)));
+    let deprecated_declared_classes = deprecated_declared_classes
+        .into_iter()
+        .map(|c| match c {
+            DeclaredClass::Deprecated(c) => c.0,
+            DeclaredClass::Sierra(_) => {
+                panic!("Internal error: unexpected Sierra class declaration")
+            }
+        })
+        .collect();
+    let declared_classes = declared_classes
+        .into_iter()
+        .map(|c| match c {
+            DeclaredClass::Deprecated(_) => {
+                panic!("Internal error: unexpected deprecated class declaration")
+            }
+            DeclaredClass::Sierra(c) => c,
+        })
+        .collect();
+
+    let mut stmt = tx
+        .prepare_cached(
+            r"SELECT
+                cu1.contract_address AS contract_address,
+                cu1.class_hash AS class_hash,
+                cu2.block_number IS NOT NULL AS is_replaced
+            FROM
+                contract_updates cu1
+            LEFT OUTER JOIN
+                contract_updates cu2 ON cu1.contract_address = cu2.contract_address AND cu2.block_number < cu1.block_number
+            WHERE
+                cu1.block_number = ?",
+        )
+        .context("Preparing contract update query statement")?;
+    enum DeployedOrReplacedContract {
+        Deployed(DeployedContract),
+        Replaced(ReplacedClass),
+    }
+    let deployed_and_replaced_contracts = stmt
+        .query_map([number], |row| {
+            let address: ContractAddress = row.get(0)?;
+            let class_hash: ClassHash = row.get(1)?;
+            let is_replaced: bool = row.get(2)?;
+
+            Ok(match is_replaced {
+                true => DeployedOrReplacedContract::Replaced(ReplacedClass {
+                    contract_address: *address.get(),
+                    contract_class_hash: class_hash.0,
+                }),
+                false => DeployedOrReplacedContract::Deployed(DeployedContract {
+                    contract_address: *address.get(),
+                    contract_class_hash: class_hash.0,
+                }),
+            })
+        })
+        .context("Querying contract deployments")?
+        .collect::<Result<Vec<_>, _>>()
+        .context("Iterating over contract deployment query rows")?;
+    let (deployed_contracts, replaced_classes): (Vec<_>, Vec<_>) = deployed_and_replaced_contracts
+        .into_iter()
+        .partition(|c| matches!(c, DeployedOrReplacedContract::Deployed(_)));
+    let deployed_contracts = deployed_contracts
+        .into_iter()
+        .map(|c| match c {
+            DeployedOrReplacedContract::Deployed(c) => c,
+            DeployedOrReplacedContract::Replaced(_) => {
+                panic!("Internal error: unexpected replaced class")
+            }
+        })
+        .collect();
+    let replaced_classes = replaced_classes
+        .into_iter()
+        .map(|c| match c {
+            DeployedOrReplacedContract::Deployed(_) => {
+                panic!("Internal error: unexpected deployed contract")
+            }
+            DeployedOrReplacedContract::Replaced(c) => c,
+        })
+        .collect();
+
+    let mut contract_diffs = nonces
+        .into_iter()
+        .map(|(contract_address, nonce)| {
+            (
+                *contract_address.get(),
+                ContractDiff {
+                    contract_address: *contract_address.get(),
+                    nonce: nonce.0,
+                    storage_diffs: storage_diffs.remove(&contract_address).unwrap_or_default(),
+                },
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    // TODO remove me
+    debug_assert!(
+        storage_diffs.is_empty(),
+        "a storage update is always accompanied by a nonce update, but is it the other way round?"
+    );
+
+    storage_diffs
+        .into_iter()
+        .for_each(|(contract_address, storage_diffs)| {
+            contract_diffs.insert(
+                *contract_address.get(),
+                ContractDiff {
+                    contract_address: *contract_address.get(),
+                    nonce: Felt::ZERO,
+                    storage_diffs,
+                },
+            );
+        });
+
+    Ok(proto::propagation::BlockStateUpdate {
+        contract_diffs: contract_diffs.into_iter().map(|(_, diff)| diff).collect(),
+        deployed_contracts,
+        declared_deprecated_contract_class_hashes: deprecated_declared_classes,
+        declared_contract_classes: declared_classes,
+        replaced_contract_classes: replaced_classes,
+    })
 }
 
 mod body {

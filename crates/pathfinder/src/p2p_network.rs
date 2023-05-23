@@ -3,11 +3,9 @@ use std::sync::Arc;
 use anyhow::Context;
 use p2p::libp2p::{identity::Keypair, multiaddr::Multiaddr, PeerId};
 use p2p::Peers;
-use p2p_proto as proto;
 use pathfinder_common::ChainId;
 use pathfinder_rpc::SyncState;
 use pathfinder_storage::Storage;
-use proto::sync::StateDiffs;
 use stark_hash::Felt;
 use tokio::sync::RwLock;
 use tracing::Instrument;
@@ -115,9 +113,9 @@ async fn handle_p2p_event(
                 Request::GetBlockBodies(r) => {
                     Response::BlockBodies(sync_handlers::get_block_bodies(r, storage).await?)
                 }
-                Request::GetStateDiffs(_r) => Response::StateDiffs(StateDiffs {
-                    block_state_updates: vec![],
-                }),
+                Request::GetStateDiffs(r) => {
+                    Response::StateDiffs(sync_handlers::get_state_updates(r, storage).await?)
+                }
                 Request::Status(_) => Response::Status(current_status(chain_id, sync_state).await),
             };
             p2p_client.send_sync_response(channel, response).await;
