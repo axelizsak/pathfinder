@@ -152,7 +152,13 @@ async fn main() -> anyhow::Result<()> {
 
     info!("📡 HTTP-RPC server started on: {}", local_addr);
 
-    let p2p_handle = start_p2p(pathfinder_context.network_id, storage, sync_state).await?;
+    let p2p_handle = start_p2p(
+        pathfinder_context.network_id,
+        storage,
+        sync_state,
+        config.p2p_boot,
+    )
+    .await?;
 
     let update_handle = tokio::spawn(update::poll_github_for_releases());
 
@@ -243,16 +249,22 @@ async fn start_p2p(
     chain_id: ChainId,
     storage: Storage,
     sync_state: Arc<SyncState>,
+    i_am_boot: bool,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
     let p2p_listen_address = std::env::var("PATHFINDER_P2P_LISTEN_ADDRESS")
-        .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/4001".to_owned());
+        .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/0".to_owned());
     let listen_on: p2p::libp2p::Multiaddr = p2p_listen_address.parse()?;
 
-    let p2p_bootstrap_addresses = std::env::var("PATHFINDER_P2P_BOOTSTRAP_MULTIADDRESSES")?;
-    let bootstrap_addresses = p2p_bootstrap_addresses
-        .split_ascii_whitespace()
-        .map(|a| a.parse::<p2p::libp2p::Multiaddr>())
-        .collect::<Result<Vec<_>, _>>()?;
+    let bootstrap_addresses = if i_am_boot {
+        Vec::new()
+    } else {
+        let p2p_bootstrap_addresses =
+            std::env::var("PATHFINDER_P2P_BOOTSTRAP_MULTIADDRESSES").unwrap_or_default();
+        p2p_bootstrap_addresses
+            .split_ascii_whitespace()
+            .map(|a| a.parse::<p2p::libp2p::Multiaddr>())
+            .collect::<Result<Vec<_>, _>>()?
+    };
 
     let (_p2p_peers, _p2p_client, p2p_handle) = pathfinder_lib::p2p_network::start(
         chain_id,
@@ -268,9 +280,10 @@ async fn start_p2p(
 
 #[cfg(not(feature = "p2p"))]
 async fn start_p2p(
-    _chain_id: ChainId,
-    _storage: Storage,
-    _sync_state: Arc<SyncState>,
+    _: ChainId,
+    _: Storage,
+    _: Arc<SyncState>,
+    _: bool,
 ) -> anyhow::Result<tokio::task::JoinHandle<()>> {
     let join_handle = tokio::task::spawn(async move { futures::future::pending().await });
 

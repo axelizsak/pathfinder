@@ -414,6 +414,10 @@ impl MainLoop {
                 tracing::debug!(%peer_id, "Dialing peer");
                 Ok(())
             }
+            SwarmEvent::NewListenAddr { address, .. } => {
+                tracing::debug!(%address, "New listen");
+                Ok(())
+            }
             // ===========================
             // Identify
             // ===========================
