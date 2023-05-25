@@ -41,11 +41,6 @@ use tokio::sync::mpsc;
 
 use crate::state::l2::BlockChain;
 use crate::state::sync::class::{download_class, DownloadedClass};
-#[cfg(feature = "p2p")]
-type P2PSyncClient = p2p::SyncClient;
-
-#[cfg(not(feature = "p2p"))]
-type P2PSyncClient = ();
 
 /// Implements the main sync loop, where L1 and L2 sync results are combined.
 #[allow(clippy::too_many_arguments)]

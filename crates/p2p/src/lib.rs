@@ -87,9 +87,27 @@ impl Default for PeriodicTaskConfig {
 #[derive(Clone, Debug)]
 pub struct SyncClient {
     client: Client,
+    block_propagation_topic: String,
 }
 
+// FIXME make sure the api looks reasonable from the perspective of
+// the __user__, which is the sync driving algo/entity
 impl SyncClient {
+    // Propagate new L2 head header
+    pub async fn propagate_new_head(
+        &self,
+        header: p2p_proto::common::BlockHeader,
+    ) -> anyhow::Result<()> {
+        self.client
+            .publish_propagation_message(
+                &self.block_propagation_topic,
+                p2p_proto::propagation::Message::NewBlockHeader(
+                    p2p_proto::propagation::NewBlockHeader { header },
+                ),
+            )
+            .await
+    }
+
     pub async fn block_headers(
         &self,
         start_block_hash: BlockHash, // FIXME, hash to avoid DB lookup
@@ -174,7 +192,7 @@ impl SyncClient {
         }
     }
 
-    pub async fn contract_classes() {
+    pub async fn contract_classes(&self) {
         todo!()
     }
 
@@ -290,9 +308,10 @@ impl Client {
             .expect("Command receiver not to be dropped");
     }
 
-    pub fn sync_handle(&self) -> SyncClient {
+    pub fn sync_handle(&self, block_propagation_topic: String) -> SyncClient {
         SyncClient {
             client: self.clone(),
+            block_propagation_topic,
         }
     }
 

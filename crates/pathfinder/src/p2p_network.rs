@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use p2p::libp2p::{identity::Keypair, multiaddr::Multiaddr, PeerId};
-use p2p::Peers;
+use p2p::{Peers, SyncClient};
 use pathfinder_common::ChainId;
 use pathfinder_rpc::SyncState;
 use pathfinder_storage::Storage;
@@ -10,6 +10,7 @@ use stark_hash::Felt;
 use tokio::sync::RwLock;
 use tracing::Instrument;
 
+pub mod client;
 mod sync_handlers;
 
 #[tracing::instrument(name = "p2p", skip_all)]
@@ -19,11 +20,7 @@ pub async fn start(
     sync_state: Arc<SyncState>,
     listen_on: Multiaddr,
     bootstrap_addresses: &[Multiaddr],
-) -> anyhow::Result<(
-    Arc<RwLock<Peers>>,
-    p2p::SyncClient,
-    tokio::task::JoinHandle<()>,
-)> {
+) -> anyhow::Result<(Arc<RwLock<Peers>>, SyncClient, tokio::task::JoinHandle<()>)> {
     let keypair = Keypair::generate_ed25519();
 
     let peer_id = keypair.public().to_peer_id();
@@ -63,7 +60,11 @@ pub async fn start(
     }
 
     let block_propagation_topic = format!("blocks/{}", chain_id.to_hex_str());
-    p2p_client.subscribe_topic(&block_propagation_topic).await?;
+
+    if !bootstrap_addresses.is_empty() {
+        // Bootstrap nodes don't subscribe to topic they're publishing to
+        p2p_client.subscribe_topic(&block_propagation_topic).await?;
+    }
 
     let join_handle = {
         let mut p2p_client = p2p_client.clone();
@@ -88,7 +89,11 @@ pub async fn start(
         )
     };
 
-    Ok((peers, p2p_client.sync_handle(), join_handle))
+    Ok((
+        peers,
+        p2p_client.sync_handle(block_propagation_topic),
+        join_handle,
+    ))
 }
 
 async fn handle_p2p_event(
