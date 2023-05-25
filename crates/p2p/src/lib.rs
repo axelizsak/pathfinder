@@ -177,6 +177,14 @@ impl SyncClient {
     pub async fn contract_classes() {
         todo!()
     }
+
+    // #[cfg(any(test, feature = "test-utils"))]
+    // pub fn for_tests() -> Self {
+    //     let (sender, _) = mpsc::channel(1);
+    //     Self {
+    //         client: Client { sender },
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug)]

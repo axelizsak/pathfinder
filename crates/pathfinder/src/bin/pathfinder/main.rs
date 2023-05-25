@@ -23,6 +23,20 @@ use crate::config::NetworkConfig;
 mod config;
 mod update;
 
+// FIXME ignore pending for crude p2p testing
+#[cfg(feature = "p2p")]
+fn disable_pending(config: &mut config::Config) {
+    config.poll_pending = false;
+}
+#[cfg(not(feature = "p2p"))]
+fn disable_pending(_: &mut config::Config) {}
+
+#[cfg(feature = "p2p")]
+type P2PSyncClient = p2p::SyncClient;
+
+#[cfg(not(feature = "p2p"))]
+type P2PSyncClient = ();
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if std::env::var_os("RUST_LOG").is_none() {
@@ -32,7 +46,9 @@ async fn main() -> anyhow::Result<()> {
 
     setup_tracing();
 
-    let config = config::Config::parse();
+    let mut config = config::Config::parse();
+
+    disable_pending(&mut config);
 
     info!(
         // this is expected to be $(last_git_tag)-$(commits_since)-$(commit_hash)
@@ -126,14 +142,22 @@ async fn main() -> anyhow::Result<()> {
         None => rpc_server,
     };
 
-    let sync_handle = tokio::spawn(state::sync(
+    let (p2p_handle, _p2p_sync_client) = start_p2p(
+        pathfinder_context.network_id,
         storage.clone(),
+        sync_state.clone(),
+        config.p2p_boot,
+    )
+    .await?;
+
+    let sync_handle = tokio::spawn(state::sync(
+        storage,
         ethereum.client,
         pathfinder_context.network,
         pathfinder_context.network_id,
         pathfinder_context.l1_core_address,
         pathfinder_context.gateway,
-        sync_state.clone(),
+        sync_state,
         state::l1::sync,
         state::l2::sync,
         pending_state,
@@ -151,14 +175,6 @@ async fn main() -> anyhow::Result<()> {
         .context("Starting the RPC server")?;
 
     info!("📡 HTTP-RPC server started on: {}", local_addr);
-
-    let (p2p_handle, p2p_sync_handle) = start_p2p(
-        pathfinder_context.network_id,
-        storage,
-        sync_state,
-        config.p2p_boot,
-    )
-    .await?;
 
     let update_handle = tokio::spawn(update::poll_github_for_releases());
 
@@ -250,7 +266,7 @@ async fn start_p2p(
     storage: Storage,
     sync_state: Arc<SyncState>,
     i_am_boot: bool,
-) -> anyhow::Result<(tokio::task::JoinHandle<()>, p2p::SyncClient)> {
+) -> anyhow::Result<(tokio::task::JoinHandle<()>, Option<P2PSyncClient>)> {
     let p2p_listen_address = std::env::var("PATHFINDER_P2P_LISTEN_ADDRESS")
         .unwrap_or_else(|_| "/ip4/0.0.0.0/tcp/0".to_owned());
     let listen_on: p2p::libp2p::Multiaddr = p2p_listen_address.parse()?;
@@ -266,7 +282,7 @@ async fn start_p2p(
             .collect::<Result<Vec<_>, _>>()?
     };
 
-    let (_p2p_peers, p2p_sync_handle, p2p_handle) = pathfinder_lib::p2p_network::start(
+    let (_p2p_peers, p2p_sync_client, p2p_handle) = pathfinder_lib::p2p_network::start(
         chain_id,
         storage,
         sync_state,
@@ -275,7 +291,7 @@ async fn start_p2p(
     )
     .await?;
 
-    Ok((p2p_handle, p2p_sync_handle))
+    Ok((p2p_handle, (!i_am_boot).then_some(p2p_sync_client)))
 }
 
 #[cfg(not(feature = "p2p"))]
@@ -284,10 +300,10 @@ async fn start_p2p(
     _: Storage,
     _: Arc<SyncState>,
     _: bool,
-) -> anyhow::Result<tokio::task::JoinHandle<()>> {
+) -> anyhow::Result<(tokio::task::JoinHandle<()>, Option<P2PSyncClient>)> {
     let join_handle = tokio::task::spawn(async move { futures::future::pending().await });
 
-    Ok(join_handle)
+    Ok((join_handle, None))
 }
 
 /// Spawns the monitoring task at the given address.
