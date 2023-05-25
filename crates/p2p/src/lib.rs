@@ -14,6 +14,7 @@ use libp2p::request_response::{self, RequestId, ResponseChannel};
 use libp2p::swarm::{SwarmBuilder, SwarmEvent};
 use libp2p::Multiaddr;
 use libp2p::{identify, PeerId};
+use pathfinder_common::BlockHash;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 mod behaviour;
@@ -80,6 +81,101 @@ impl Default for PeriodicTaskConfig {
             },
             status_period: Duration::from_secs(30),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SyncClient {
+    client: Client,
+}
+
+impl SyncClient {
+    pub async fn block_headers(
+        &self,
+        start_block_hash: BlockHash, // FIXME, hash to avoid DB lookup
+        num_blocks: usize,           // FIXME, use range?
+    ) -> anyhow::Result<Vec<p2p_proto::common::BlockHeader>> {
+        if num_blocks == 0 {
+            return Ok(Vec::new());
+        }
+
+        // TODO pick some peer
+        let response = self
+            .client
+            .send_sync_request(
+                PeerId::random(), // FIXME
+                p2p_proto::sync::Request::GetBlockHeaders(p2p_proto::sync::GetBlockHeaders {
+                    start_block: start_block_hash.0,
+                    count: num_blocks.try_into().expect("Can it go wrong here?"),
+                    size_limit: u64::MAX, // FIXME
+                    direction: p2p_proto::sync::Direction::Forward,
+                }),
+            )
+            .await?;
+        match response {
+            p2p_proto::sync::Response::BlockHeaders(x) => Ok(x.headers),
+            _ => anyhow::bail!("Response variant does not match request"),
+        }
+    }
+
+    pub async fn block_bodies(
+        &self,
+        start_block_hash: BlockHash, // FIXME, hash to avoid DB lookup
+        num_blocks: usize,           // FIXME, use range?
+    ) -> anyhow::Result<Vec<p2p_proto::common::BlockBody>> {
+        if num_blocks == 0 {
+            return Ok(Vec::new());
+        }
+
+        // TODO pick some peer
+        let response = self
+            .client
+            .send_sync_request(
+                PeerId::random(), // FIXME
+                p2p_proto::sync::Request::GetBlockBodies(p2p_proto::sync::GetBlockBodies {
+                    start_block: start_block_hash.0,
+                    count: num_blocks.try_into().expect("Can it go wrong here?"),
+                    size_limit: u64::MAX, // FIXME
+                    direction: p2p_proto::sync::Direction::Forward,
+                }),
+            )
+            .await?;
+        match response {
+            p2p_proto::sync::Response::BlockBodies(x) => Ok(x.block_bodies),
+            _ => anyhow::bail!("Response variant does not match request"),
+        }
+    }
+
+    pub async fn state_updates(
+        &self,
+        start_block_hash: BlockHash, // FIXME, hash to avoid DB lookup
+        num_blocks: usize,           // FIXME, use range?
+    ) -> anyhow::Result<Vec<p2p_proto::sync::BlockStateUpdateWithHash>> {
+        if num_blocks == 0 {
+            return Ok(Vec::new());
+        }
+
+        // TODO pick some peer
+        let response = self
+            .client
+            .send_sync_request(
+                PeerId::random(), // FIXME
+                p2p_proto::sync::Request::GetStateDiffs(p2p_proto::sync::GetStateDiffs {
+                    start_block: start_block_hash.0,
+                    count: num_blocks.try_into().expect("Can it go wrong here?"),
+                    size_limit: u64::MAX, // FIXME
+                    direction: p2p_proto::sync::Direction::Forward,
+                }),
+            )
+            .await?;
+        match response {
+            p2p_proto::sync::Response::StateDiffs(x) => Ok(x.block_state_updates),
+            _ => anyhow::bail!("Response variant does not match request"),
+        }
+    }
+
+    pub async fn contract_classes() {
+        todo!()
     }
 }
 
@@ -184,6 +280,12 @@ impl Client {
             .send(Command::SendSyncStatusRequest { peer_id, status })
             .await
             .expect("Command receiver not to be dropped");
+    }
+
+    pub fn sync_handle(&self) -> SyncClient {
+        SyncClient {
+            client: self.clone(),
+        }
     }
 
     #[cfg(test)]

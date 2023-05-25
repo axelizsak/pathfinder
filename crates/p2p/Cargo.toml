@@ -15,6 +15,7 @@ delay_map = "0.1.2"
 futures = "0.3.21"
 libp2p = { version = "0.51.3", default-features = false, features = ["identify", "gossipsub", "kad", "noise", "ping", "dns", "tcp", "tokio", "yamux", "request-response", "autonat", "relay", "dcutr", "macros"] }
 p2p_proto = { path = "../p2p_proto" }
+pathfinder-common = { path = "../common" }
 prost = "0.11.2"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -31,7 +32,6 @@ env_logger = "0.10.0"
 fake = { workspace = true }
 hex = "0.4.3"
 p2p_proto = { path = "../p2p_proto", features = ["test-utils"] }
-pathfinder-common = { path = "../common" }
 rand = { workspace = true }
 stark_hash = { path = "../stark_hash", features = ["test-utils"] }
 test-log = { version = "0.2.11", default-features = false, features = ["trace"] }
