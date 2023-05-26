@@ -164,6 +164,13 @@ pub struct ContractClass {
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[protobuf(name = "crate::proto::common::CompressedContractClass")]
+pub struct CompressedContractClass {
+    pub class: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
+#[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::contract_class::EntryPoint")]
 pub struct EntryPoint {
     pub selector: Felt,

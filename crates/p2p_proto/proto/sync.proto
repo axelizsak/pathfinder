@@ -11,6 +11,7 @@ message Request {
     GetBlockBodies get_block_bodies = 2;
     GetStateDiffs get_state_diffs = 3;
     Status status = 4;
+    GetContractClasses get_contract_classes = 5;
   }
 }
 
@@ -20,6 +21,7 @@ message Response {
     BlockBodies block_bodies = 2;
     StateDiffs state_diffs = 3;
     Status status = 4;
+    ContractClasses classes = 5;
   }
 }
 
@@ -79,4 +81,14 @@ message Status {
   uint64 height = 1;
   starknet.common.FieldElement hash = 2;
   starknet.common.FieldElement chain_id = 3;
+}
+
+message GetContractClasses {
+  repeated starknet.common.FieldElement class_hashes = 1;
+  uint64 count = 2; // how many classes, at most, to retrieve
+  uint64 size_limit = 3;
+}
+
+message ContractClasses {
+  repeated starknet.common.CompressedContractClass contract_classes = 1;
 }

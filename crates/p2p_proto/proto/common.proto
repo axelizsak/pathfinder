@@ -153,3 +153,7 @@ message BlockBody {
   repeated Transaction transactions = 1;
   repeated Receipt receipts = 4;
 }
+
+message CompressedContractClass {
+  bytes class = 1;
+}

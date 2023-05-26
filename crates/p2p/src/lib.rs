@@ -14,7 +14,7 @@ use libp2p::request_response::{self, RequestId, ResponseChannel};
 use libp2p::swarm::{SwarmBuilder, SwarmEvent};
 use libp2p::Multiaddr;
 use libp2p::{identify, PeerId};
-use pathfinder_common::BlockHash;
+use pathfinder_common::{BlockHash, ClassHash};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 mod behaviour;
@@ -192,8 +192,24 @@ impl SyncClient {
         }
     }
 
-    pub async fn contract_classes(&self) {
-        todo!()
+    pub async fn contract_classes(&self, class_hashes: Vec<ClassHash>) -> anyhow::Result<Vec<()>> {
+        // TODO pick some peer
+        let response = self
+            .client
+            .send_sync_request(
+                PeerId::random(), // FIXME
+                p2p_proto::sync::Request::GetStateDiffs(p2p_proto::sync::GetStateDiffs {
+                    start_block: start_block_hash.0,
+                    count: num_blocks.try_into().expect("Can it go wrong here?"),
+                    size_limit: u64::MAX, // FIXME
+                    direction: p2p_proto::sync::Direction::Forward,
+                }),
+            )
+            .await?;
+        match response {
+            p2p_proto::sync::Response::StateDiffs(x) => Ok(x.block_state_updates),
+            _ => anyhow::bail!("Response variant does not match request"),
+        }
     }
 
     // #[cfg(any(test, feature = "test-utils"))]
