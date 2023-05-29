@@ -8,7 +8,7 @@ use libp2p::Multiaddr;
 use libp2p::{identity::Keypair, PeerId};
 use p2p::Peers;
 use p2p_proto as proto;
-use proto::sync::{BlockBodies, StateDiffs};
+use proto::sync::{BlockBodies, ContractClasses, StateDiffs};
 use serde::Deserialize;
 use stark_hash::Felt;
 use tokio::sync::RwLock;
@@ -157,6 +157,9 @@ async fn main() -> anyhow::Result<()> {
                         chain_id: GOERLI_CHAIN_ID.into(),
                         height: 128,
                         hash: Felt::ZERO,
+                    }),
+                    Request::GetContractClasses(_) => Response::ContractClasses(ContractClasses {
+                        contract_classes: vec![],
                     }),
                 };
                 p2p_client.send_sync_response(channel, response).await;

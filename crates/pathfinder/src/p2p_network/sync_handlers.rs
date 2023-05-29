@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Context};
 use p2p_proto as proto;
-use pathfinder_common::{BlockHash, BlockNumber, TransactionNonce};
+use pathfinder_common::{BlockHash, BlockNumber, ClassHash, TransactionNonce};
 use pathfinder_storage::{StarknetBlocksBlockId, StarknetTransactionsTable, Storage};
 use stark_hash::Felt;
 
@@ -240,7 +240,7 @@ fn get_state_update_from_storage(
         ContractDiff, DeclaredClass as DeclaredSierraClass, DeployedContract, ReplacedClass,
         StorageDiff,
     };
-    use pathfinder_common::{CasmHash, ClassHash, ContractAddress, StorageAddress, StorageValue};
+    use pathfinder_common::{CasmHash, ContractAddress, StorageAddress, StorageValue};
 
     let mut stmt = tx
         .prepare_cached("SELECT contract_address, nonce FROM nonce_updates WHERE block_number = ?")
@@ -436,6 +436,48 @@ fn get_state_update_from_storage(
         declared_contract_classes: declared_classes,
         replaced_contract_classes: replaced_classes,
     })
+}
+
+// TODO: we currently ignore the size limit.
+pub async fn get_classes(
+    request: p2p_proto::sync::GetContractClasses,
+    storage: &Storage,
+) -> anyhow::Result<p2p_proto::sync::ContractClasses> {
+    let storage = storage.clone();
+    let span = tracing::Span::current();
+
+    tokio::task::spawn_blocking(move || {
+        let _g = span.enter();
+        let mut connection = storage
+            .connection()
+            .context("Opening database connection")?;
+        let tx = connection
+            .transaction()
+            .context("Creating database transaction")?;
+
+        let contract_classes = fetch_contract_classes(tx, request)?;
+
+        Ok(p2p_proto::sync::ContractClasses { contract_classes })
+    })
+    .await
+    .context("Database read panic or shutting down")?
+}
+
+fn fetch_contract_classes(
+    tx: rusqlite::Transaction<'_>,
+    request: p2p_proto::sync::GetContractClasses,
+) -> anyhow::Result<Vec<p2p_proto::common::CompressedContractClass>> {
+    use pathfinder_storage::ContractCodeTable;
+
+    let mut classes = Vec::new();
+    for hash in request.class_hashes {
+        let class = ContractCodeTable::get_compressed_class(&tx, ClassHash(hash))?;
+        if let Some(class) = class {
+            classes.push(p2p_proto::common::CompressedContractClass { class });
+        }
+    }
+
+    Ok(classes)
 }
 
 mod body {

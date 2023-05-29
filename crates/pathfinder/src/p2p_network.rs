@@ -10,6 +10,8 @@ use stark_hash::Felt;
 use tokio::sync::RwLock;
 use tracing::Instrument;
 
+use crate::p2p_network::sync_handlers::get_classes;
+
 pub mod client;
 mod sync_handlers;
 
@@ -126,6 +128,9 @@ async fn handle_p2p_event(
                     Response::StateDiffs(sync_handlers::get_state_updates(r, storage).await?)
                 }
                 Request::Status(_) => Response::Status(current_status(chain_id, sync_state).await),
+                Request::GetContractClasses(r) => {
+                    Response::ContractClasses(get_classes(r, storage).await?)
+                }
             };
             p2p_client.send_sync_response(channel, response).await;
         }

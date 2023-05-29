@@ -30,6 +30,29 @@ impl ClassDefinitionsTable {
         Ok(())
     }
 
+    pub fn get_compressed_class(
+        transaction: &Transaction<'_>,
+        hash: ClassHash,
+    ) -> anyhow::Result<Option<Vec<u8>>> {
+        let row = transaction
+            .query_row(
+                "SELECT definition
+                FROM class_definitions
+                WHERE hash = :hash",
+                named_params! {
+                    ":hash": &hash.0.to_be_bytes()
+                },
+                |row| {
+                    let definition: Vec<u8> = row.get("definition")?;
+
+                    Ok(definition)
+                },
+            )
+            .optional()?;
+
+        Ok(row)
+    }
+
     /// Returns true for each [ClassHash] if the class definition already exists in the table.
     pub fn exists(
         transaction: &Transaction<'_>,

@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use p2p::SyncClient;
 use p2p_proto;
+use p2p_proto::common::CompressedContractClass;
 use pathfinder_common::{
     BlockHash, BlockId, CallParam, CasmHash, ClassHash, ContractAddress, ContractAddressSalt,
     ContractNonce, Fee, SequencerAddress, SierraHash, StateCommitment, StorageAddress,
@@ -78,7 +79,20 @@ impl GatewayApi for Client {
     async fn class_by_hash(&self, class_hash: ClassHash) -> Result<bytes::Bytes, SequencerError> {
         match self {
             Client::Bootstrap { sequencer, .. } => sequencer.class_by_hash(class_hash).await,
-            Client::NonPropagating { p2p_client, .. } => todo!(),
+            Client::NonPropagating { p2p_client, .. } => {
+                let classes = p2p_client
+                    .contract_classes(vec![class_hash])
+                    .await
+                    .expect("TODO map error");
+                let mut classes = classes.contract_classes;
+                assert_eq!(
+                    classes.len(),
+                    1,
+                    "TODO where to handle insufficient data len"
+                );
+                let CompressedContractClass { class } = classes.swap_remove(0);
+                Ok(class.into())
+            }
         }
     }
 
@@ -115,7 +129,10 @@ impl GatewayApi for Client {
             Client::Bootstrap { sequencer, .. } => sequencer.state_update(block).await,
             Client::NonPropagating { p2p_client, .. } => match block {
                 BlockId::Hash(hash) => {
-                    let mut state_updates = p2p_client.state_updates(hash, 1).await.expect("TODO");
+                    let mut state_updates = p2p_client
+                        .state_updates(hash, 1)
+                        .await
+                        .expect("TODO map error");
                     assert_eq!(
                         state_updates.len(),
                         1,

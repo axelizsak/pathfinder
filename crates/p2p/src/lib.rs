@@ -180,7 +180,7 @@ impl SyncClient {
                 PeerId::random(), // FIXME
                 p2p_proto::sync::Request::GetStateDiffs(p2p_proto::sync::GetStateDiffs {
                     start_block: start_block_hash.0,
-                    count: num_blocks.try_into().expect("Can it go wrong here?"),
+                    count: num_blocks.try_into()?,
                     size_limit: u64::MAX, // FIXME
                     direction: p2p_proto::sync::Direction::Forward,
                 }),
@@ -192,22 +192,24 @@ impl SyncClient {
         }
     }
 
-    pub async fn contract_classes(&self, class_hashes: Vec<ClassHash>) -> anyhow::Result<Vec<()>> {
+    pub async fn contract_classes(
+        &self,
+        class_hashes: Vec<ClassHash>,
+    ) -> anyhow::Result<p2p_proto::sync::ContractClasses> {
         // TODO pick some peer
         let response = self
             .client
             .send_sync_request(
                 PeerId::random(), // FIXME
-                p2p_proto::sync::Request::GetStateDiffs(p2p_proto::sync::GetStateDiffs {
-                    start_block: start_block_hash.0,
-                    count: num_blocks.try_into().expect("Can it go wrong here?"),
+                p2p_proto::sync::Request::GetContractClasses(p2p_proto::sync::GetContractClasses {
+                    count: class_hashes.len().try_into()?,
+                    class_hashes: class_hashes.into_iter().map(|x| x.0).collect(),
                     size_limit: u64::MAX, // FIXME
-                    direction: p2p_proto::sync::Direction::Forward,
                 }),
             )
             .await?;
         match response {
-            p2p_proto::sync::Response::StateDiffs(x) => Ok(x.block_state_updates),
+            p2p_proto::sync::Response::ContractClasses(x) => Ok(x),
             _ => anyhow::bail!("Response variant does not match request"),
         }
     }
