@@ -65,6 +65,12 @@ impl<M, T: ToProtobuf<M>> ToProtobuf<Vec<M>> for Vec<T> {
     }
 }
 
+impl<M, T: ToProtobuf<M>> ToProtobuf<Option<M>> for Option<T> {
+    fn to_protobuf(self) -> Option<M> {
+        self.map(ToProtobuf::to_protobuf)
+    }
+}
+
 pub trait TryFromProtobuf<M>
 where
     Self: Sized,

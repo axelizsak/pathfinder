@@ -234,12 +234,12 @@ pub mod transaction {
         #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
         #[serde(deny_unknown_fields)]
         pub struct NormalBuiltinInstanceCounter {
-            bitwise_builtin: u64,
-            ecdsa_builtin: u64,
-            ec_op_builtin: u64,
-            output_builtin: u64,
-            pedersen_builtin: u64,
-            range_check_builtin: u64,
+            pub bitwise_builtin: u64,
+            pub ecdsa_builtin: u64,
+            pub ec_op_builtin: u64,
+            pub output_builtin: u64,
+            pub pedersen_builtin: u64,
+            pub range_check_builtin: u64,
         }
 
         #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

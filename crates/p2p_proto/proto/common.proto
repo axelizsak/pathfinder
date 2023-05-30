@@ -50,6 +50,7 @@ message DeclareTransaction {
   repeated FieldElement signature = 4;
   FieldElement nonce = 5;
   FieldElement version = 6;
+  FieldElement compiled_class_hash = 7;
 }
 
 message DeployTransaction {
@@ -109,6 +110,14 @@ message MessageToL1 {
   EthereumAddress to_address = 3;
 }
 
+message MessageToL2 {
+  EthereumAddress from_address = 1;
+  repeated FieldElement payload = 2;
+  FieldElement to_address = 3;
+  FieldElement entry_point_selector = 4;
+  FieldElement nonce = 5;
+}
+
 message Event {
   FieldElement from_address = 1;
   repeated FieldElement keys = 2;
@@ -121,6 +130,23 @@ message CommonTransactionReceiptProperties {
   FieldElement actual_fee = 3;
   repeated MessageToL1 messages_sent = 4;
   repeated Event events = 5;
+  MessageToL2 consumed_message = 6;
+  ExecutionResources execution_resources = 7;
+}
+
+message ExecutionResources {
+  message BuiltinInstanceCounter {
+    uint64 bitwise_builtin = 1;
+    uint64 ecdsa_builtin = 2;
+    uint64 ec_op_builtin = 3;
+    uint64 output_builtin = 4;
+    uint64 pedersen_builtin = 5;
+    uint64 range_check_builtin = 6;
+  }
+
+  BuiltinInstanceCounter builtin_instance_counter = 1;
+  uint64 n_steps = 2;
+  uint64 n_memory_holes = 3;
 }
 
 message InvokeTransactionReceipt {

@@ -491,12 +491,13 @@ fn fetch_contract_classes(
 
 mod body {
     use p2p_proto::common::{
-        CommonTransactionReceiptProperties, DeclareTransaction, DeclareTransactionReceipt,
-        DeployAccountTransaction, DeployAccountTransactionReceipt, DeployTransaction,
-        DeployTransactionReceipt, EntryPoint, Event, InvokeTransaction, InvokeTransactionReceipt,
-        MessageToL1, Receipt, Transaction,
+        execution_resources::BuiltinInstanceCounter, CommonTransactionReceiptProperties,
+        DeclareTransaction, DeclareTransactionReceipt, DeployAccountTransaction,
+        DeployAccountTransactionReceipt, DeployTransaction, DeployTransactionReceipt, EntryPoint,
+        Event, ExecutionResources, InvokeTransaction, InvokeTransactionReceipt, MessageToL1,
+        MessageToL2, Receipt, Transaction,
     };
-    use pathfinder_common::{Fee, TransactionNonce};
+    use pathfinder_common::{Fee, L1ToL2MessageNonce, TransactionNonce};
     use stark_hash::Felt;
     use starknet_gateway_types::reply::transaction as gw;
 
@@ -524,6 +525,30 @@ mod body {
                     data: e.data.into_iter().map(|d| d.0).collect(),
                 })
                 .collect(),
+            consumed_message: gw_r.l1_to_l2_consumed_message.map(|x| MessageToL2 {
+                from_address: x.from_address.0,
+                payload: x.payload.into_iter().map(|e| e.0).collect(),
+                to_address: *x.to_address.get(),
+                entry_point_selector: x.selector.0,
+                nonce: x.nonce.unwrap_or(L1ToL2MessageNonce::ZERO).0,
+            }),
+            execution_resources: gw_r.execution_resources.map(|x| ExecutionResources {
+                builtin_instance_counter: match x.builtin_instance_counter {
+                    gw::execution_resources::BuiltinInstanceCounter::Normal(b) => {
+                        Some(BuiltinInstanceCounter {
+                            bitwise_builtin: b.bitwise_builtin,
+                            ecdsa_builtin: b.ecdsa_builtin,
+                            ec_op_builtin: b.ec_op_builtin,
+                            output_builtin: b.output_builtin,
+                            pedersen_builtin: b.pedersen_builtin,
+                            range_check_builtin: b.pedersen_builtin,
+                        })
+                    }
+                    gw::execution_resources::BuiltinInstanceCounter::Empty(_) => None,
+                },
+                n_steps: x.n_steps,
+                n_memory_holes: x.n_memory_holes,
+            }),
         };
 
         let version =
@@ -541,6 +566,8 @@ mod body {
                     max_fee: t.max_fee.0,
                     nonce: t.nonce.0,
                     version,
+                    // TODO should be optional
+                    compiled_class_hash: Felt::ZERO,
                 });
                 (t, r)
             }
@@ -553,6 +580,7 @@ mod body {
                     max_fee: t.max_fee.0,
                     nonce: t.nonce.0,
                     version,
+                    compiled_class_hash: t.compiled_class_hash.0,
                 });
                 (t, r)
             }

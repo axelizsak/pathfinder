@@ -131,6 +131,7 @@ pub struct DeclareTransaction {
     pub max_fee: Felt,
     pub nonce: Felt,
     pub version: Felt,
+    pub compiled_class_hash: Felt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
@@ -215,6 +216,70 @@ impl<T> Dummy<T> for MessageToL1 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
+#[protobuf(name = "crate::proto::common::MessageToL2")]
+pub struct MessageToL2 {
+    pub from_address: primitive_types::H160,
+    pub payload: Vec<Felt>,
+    pub to_address: Felt,
+    pub entry_point_selector: Felt,
+    pub nonce: Felt,
+}
+
+#[cfg(feature = "test-utils")]
+impl<T> Dummy<T> for MessageToL2 {
+    fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &T, _: &mut R) -> Self {
+        Self {
+            from_address: primitive_types::H160::random(),
+            payload: Faker.fake(),
+            to_address: Faker.fake(),
+            entry_point_selector: Faker.fake(),
+            nonce: Faker.fake(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf)]
+#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[protobuf(name = "crate::proto::common::ExecutionResources")]
+pub struct ExecutionResources {
+    pub builtin_instance_counter: Option<execution_resources::BuiltinInstanceCounter>,
+    pub n_steps: u64,
+    pub n_memory_holes: u64,
+}
+
+impl TryFromProtobuf<crate::proto::common::ExecutionResources> for ExecutionResources {
+    fn try_from_protobuf(
+        input: crate::proto::common::ExecutionResources,
+        field_name: &'static str,
+    ) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            builtin_instance_counter: match input.builtin_instance_counter {
+                Some(x) => Some(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                None => None,
+            },
+            n_steps: TryFromProtobuf::try_from_protobuf(input.n_steps, field_name)?,
+            n_memory_holes: TryFromProtobuf::try_from_protobuf(input.n_memory_holes, field_name)?,
+        })
+    }
+}
+
+pub mod execution_resources {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
+    #[cfg_attr(feature = "test-utils", derive(Dummy))]
+    #[protobuf(name = "crate::proto::common::execution_resources::BuiltinInstanceCounter")]
+    pub struct BuiltinInstanceCounter {
+        pub bitwise_builtin: u64,
+        pub ecdsa_builtin: u64,
+        pub ec_op_builtin: u64,
+        pub output_builtin: u64,
+        pub pedersen_builtin: u64,
+        pub range_check_builtin: u64,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf)]
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::CommonTransactionReceiptProperties")]
 pub struct CommonTransactionReceiptProperties {
@@ -223,6 +288,39 @@ pub struct CommonTransactionReceiptProperties {
     pub actual_fee: Felt,
     pub messages_sent: Vec<MessageToL1>,
     pub events: Vec<Event>,
+    pub consumed_message: Option<MessageToL2>,
+    pub execution_resources: Option<ExecutionResources>,
+}
+
+impl TryFromProtobuf<crate::proto::common::CommonTransactionReceiptProperties>
+    for CommonTransactionReceiptProperties
+{
+    fn try_from_protobuf(
+        input: crate::proto::common::CommonTransactionReceiptProperties,
+        field_name: &'static str,
+    ) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            transaction_hash: TryFromProtobuf::try_from_protobuf(
+                input.transaction_hash,
+                field_name,
+            )?,
+            transaction_index: TryFromProtobuf::try_from_protobuf(
+                input.transaction_index,
+                field_name,
+            )?,
+            actual_fee: TryFromProtobuf::try_from_protobuf(input.actual_fee, field_name)?,
+            messages_sent: TryFromProtobuf::try_from_protobuf(input.messages_sent, field_name)?,
+            events: TryFromProtobuf::try_from_protobuf(input.events, field_name)?,
+            consumed_message: match input.consumed_message {
+                Some(x) => Some(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                None => None,
+            },
+            execution_resources: match input.execution_resources {
+                Some(x) => Some(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                None => None,
+            },
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
