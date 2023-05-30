@@ -219,6 +219,7 @@ impl<T> Dummy<T> for MessageToL1 {
 #[protobuf(name = "crate::proto::common::CommonTransactionReceiptProperties")]
 pub struct CommonTransactionReceiptProperties {
     pub transaction_hash: Felt,
+    pub transaction_index: u32,
     pub actual_fee: Felt,
     pub messages_sent: Vec<MessageToL1>,
     pub events: Vec<Event>,

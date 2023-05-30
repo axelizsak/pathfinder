@@ -117,9 +117,10 @@ message Event {
 
 message CommonTransactionReceiptProperties {
   FieldElement transaction_hash = 1;
-  FieldElement actual_fee = 2;
-  repeated MessageToL1 messages_sent = 3;
-  repeated Event events = 4;
+  uint32 transaction_index = 2;
+  FieldElement actual_fee = 3;
+  repeated MessageToL1 messages_sent = 4;
+  repeated Event events = 5;
 }
 
 message InvokeTransactionReceipt {

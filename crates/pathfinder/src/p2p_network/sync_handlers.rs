@@ -503,6 +503,7 @@ mod body {
     pub(super) fn from_gw((gw_t, gw_r): (gw::Transaction, gw::Receipt)) -> (Transaction, Receipt) {
         let common = CommonTransactionReceiptProperties {
             transaction_hash: gw_t.hash().0,
+            transaction_index: gw_r.transaction_index.get().try_into().expect("TODO"),
             // TODO What if the fee is missing?
             actual_fee: gw_r.actual_fee.unwrap_or(Fee::ZERO).0,
             messages_sent: gw_r

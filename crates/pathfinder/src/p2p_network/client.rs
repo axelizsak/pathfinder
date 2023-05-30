@@ -361,8 +361,8 @@ impl GatewayApi for Client {
 mod body {
     use p2p_proto::common::{BlockBody, Receipt, Transaction};
     use pathfinder_common::{
-        CallParam, ContractAddress, EntryPoint, Fee, TransactionHash, TransactionNonce,
-        TransactionSignatureElem,
+        CallParam, ContractAddress, EntryPoint, Fee, TransactionHash, TransactionIndex,
+        TransactionNonce, TransactionSignatureElem,
     };
     use stark_hash::Felt;
     use starknet_gateway_types::reply::transaction::{self as gw, EntryPointType};
@@ -440,7 +440,9 @@ mod body {
                             l1_to_l2_consumed_message: todo!(),
                             l2_to_l1_messages: todo!(),
                             transaction_hash: TransactionHash(r.common.transaction_hash),
-                            transaction_index: todo!(),
+                            transaction_index: TransactionIndex::new_or_panic(
+                                r.common.transaction_index.into(),
+                            ),
                         },
                     )
                 }),
