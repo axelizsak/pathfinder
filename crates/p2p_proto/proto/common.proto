@@ -24,16 +24,19 @@ message BlockHeader {
   FieldElement event_commitment = 11;
 
   uint32 protocol_version = 12;
+  string starknet_version = 13;
 }
 
 message InvokeTransaction {
   FieldElement contract_address = 1;
-  FieldElement entry_point_selector = 2;
+  // FieldElement entry_point_selector = 2;
+  EntryPoint entry_point_selector = 2;
   repeated FieldElement calldata = 3;
   repeated FieldElement signature = 4;
   FieldElement max_fee = 5;
   FieldElement nonce = 6;
   FieldElement version = 7;
+  // LegacyEntryPointType entry_point_type = 8;
 }
 
 message DeclareTransaction {
@@ -158,4 +161,18 @@ message BlockBody {
 
 message CompressedContractClass {
   bytes class = 1;
+}
+
+enum LegacyEntryPointType {
+  Unused = 0;
+  External = 1;
+  L1Handler = 2;
+}
+
+message EntryPoint {
+  oneof type {
+    FieldElement entry_point = 1;
+    FieldElement legacy_external = 2;
+    FieldElement legacy_l1_handler = 3;
+  }
 }

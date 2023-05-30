@@ -26,6 +26,7 @@ pub struct BlockHeader {
     pub event_commitment: Felt,
 
     pub protocol_version: u32,
+    pub starknet_version: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
@@ -100,12 +101,13 @@ impl ToProtobuf<proto::common::Transaction> for Transaction {
 #[protobuf(name = "crate::proto::common::InvokeTransaction")]
 pub struct InvokeTransaction {
     pub contract_address: Felt,
-    pub entry_point_selector: Felt,
+    pub entry_point_selector: EntryPoint,
     pub calldata: Vec<Felt>,
     pub signature: Vec<Felt>,
     pub max_fee: Felt,
     pub nonce: Felt,
     pub version: Felt,
+    // pub entry_point_type: Option<EntryPointType>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
@@ -158,11 +160,23 @@ pub struct DeployTransaction {
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::ContractClass")]
 pub struct ContractClass {
-    pub constructor_entry_points: Vec<EntryPoint>,
-    pub external_entry_points: Vec<EntryPoint>,
-    pub l1_handler_entry_points: Vec<EntryPoint>,
+    pub constructor_entry_points: Vec<contract_class::EntryPoint>,
+    pub external_entry_points: Vec<contract_class::EntryPoint>,
+    pub l1_handler_entry_points: Vec<contract_class::EntryPoint>,
     pub program: String,
     pub abi: String,
+}
+
+pub mod contract_class {
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
+    #[cfg_attr(feature = "test-utils", derive(Dummy))]
+    #[protobuf(name = "crate::proto::common::contract_class::EntryPoint")]
+    pub struct EntryPoint {
+        pub selector: Felt,
+        pub offset: Felt,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
@@ -170,14 +184,6 @@ pub struct ContractClass {
 #[protobuf(name = "crate::proto::common::CompressedContractClass")]
 pub struct CompressedContractClass {
     pub class: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
-#[protobuf(name = "crate::proto::common::contract_class::EntryPoint")]
-pub struct EntryPoint {
-    pub selector: Felt,
-    pub offset: Felt,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
@@ -311,5 +317,55 @@ impl ToProtobuf<proto::common::Receipt> for Receipt {
             Receipt::L1Handler(r) => proto::common::receipt::Receipt::L1Handler(r.to_protobuf()),
         });
         proto::common::Receipt { receipt }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "test-utils", derive(Dummy))]
+pub enum EntryPoint {
+    EntryPoint(Felt),
+    LegacyExternal(Felt),
+    LegacyL1Handler(Felt),
+}
+
+impl TryFromProtobuf<proto::common::EntryPoint> for EntryPoint {
+    fn try_from_protobuf(
+        input: proto::common::EntryPoint,
+        field_name: &'static str,
+    ) -> Result<Self, std::io::Error> {
+        match input.r#type {
+            Some(r#type) => match r#type {
+                proto::common::entry_point::Type::EntryPoint(x) => Ok(EntryPoint::EntryPoint(
+                    TryFromProtobuf::try_from_protobuf(x, field_name)?,
+                )),
+                proto::common::entry_point::Type::LegacyExternal(x) => Ok(
+                    EntryPoint::LegacyExternal(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                ),
+                proto::common::entry_point::Type::LegacyL1Handler(x) => Ok(
+                    EntryPoint::LegacyL1Handler(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                ),
+            },
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse {field_name}: missing type field"),
+            )),
+        }
+    }
+}
+
+impl ToProtobuf<proto::common::EntryPoint> for EntryPoint {
+    fn to_protobuf(self) -> proto::common::EntryPoint {
+        let r#type = Some(match self {
+            EntryPoint::EntryPoint(e) => {
+                proto::common::entry_point::Type::EntryPoint(e.to_protobuf())
+            }
+            EntryPoint::LegacyExternal(e) => {
+                proto::common::entry_point::Type::LegacyExternal(e.to_protobuf())
+            }
+            EntryPoint::LegacyL1Handler(e) => {
+                proto::common::entry_point::Type::LegacyL1Handler(e.to_protobuf())
+            }
+        });
+        proto::common::EntryPoint { r#type }
     }
 }

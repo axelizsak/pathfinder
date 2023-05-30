@@ -71,6 +71,8 @@ impl GatewayApi for Client {
                         .expect("TODO map error");
                     assert_eq!(bodies.len(), 1, "TODO handle len issues");
                     let body = bodies.swap_remove(0);
+                    let (transactions, transaction_receipts) =
+                        body::try_from_p2p(body).expect("TODO");
 
                     Ok(reply::MaybePendingBlock::Block(Block {
                         block_hash: BlockHash(header.block_hash),
@@ -85,9 +87,16 @@ impl GatewayApi for Client {
                         state_commitment: StateCommitment(header.global_state_root),
                         status: starknet_gateway_types::reply::Status::AcceptedOnL2, // FIXME
                         timestamp: BlockTimestamp::new_or_panic(header.block_timestamp),
-                        transaction_receipts: todo!(),
-                        transactions: todo!(),
-                        starknet_version: todo!(),
+                        transaction_receipts,
+                        transactions,
+                        starknet_version: {
+                            if header.starknet_version.is_empty() {
+                                None
+                            } else {
+                                Some(header.starknet_version)
+                            }
+                            .into()
+                        },
                     }))
                 }
                 BlockId::Latest => todo!(),
@@ -349,6 +358,167 @@ impl GatewayApi for Client {
     }
 }
 
+mod body {
+    use p2p_proto::common::{BlockBody, Receipt, Transaction};
+    use pathfinder_common::{
+        CallParam, ContractAddress, EntryPoint, Fee, TransactionHash, TransactionNonce,
+        TransactionSignatureElem,
+    };
+    use stark_hash::Felt;
+    use starknet_gateway_types::reply::transaction::{self as gw, EntryPointType};
+
+    pub(super) fn try_from_p2p(
+        body: BlockBody,
+    ) -> anyhow::Result<(Vec<gw::Transaction>, Vec<gw::Receipt>)> {
+        fn version(felt: Felt) -> u8 {
+            felt.to_be_bytes()[31]
+        }
+
+        fn entry_point(
+            entry_point: p2p_proto::common::EntryPoint,
+        ) -> (EntryPoint, Option<EntryPointType>) {
+            match entry_point {
+                p2p_proto::common::EntryPoint::EntryPoint(e) => (EntryPoint(e), None),
+                p2p_proto::common::EntryPoint::LegacyExternal(e) => {
+                    (EntryPoint(e), Some(EntryPointType::External))
+                }
+                p2p_proto::common::EntryPoint::LegacyL1Handler(e) => {
+                    (EntryPoint(e), Some(EntryPointType::L1Handler))
+                }
+            }
+        }
+
+        let (gw_t, gw_r) = body
+            .transactions
+            .into_iter()
+            .zip(body.receipts.into_iter())
+            .map(|(t, r)| match (t, r) {
+                (Transaction::Invoke(t), Receipt::Invoke(r)) => match version(t.version) {
+                    0 => {
+                        let (entry_point_selector, entry_point_type) =
+                            entry_point(t.entry_point_selector);
+
+                        Ok(gw::Transaction::Invoke(gw::InvokeTransaction::V0(
+                            gw::InvokeTransactionV0 {
+                                calldata: t.calldata.into_iter().map(CallParam).collect(),
+                                sender_address: ContractAddress::new_or_panic(t.contract_address),
+                                entry_point_selector,
+                                entry_point_type,
+                                max_fee: Fee(t.max_fee),
+                                signature: t
+                                    .signature
+                                    .into_iter()
+                                    .map(TransactionSignatureElem)
+                                    .collect(),
+                                transaction_hash: TransactionHash(r.common.transaction_hash),
+                            },
+                        )))
+                    }
+                    1 => Ok(gw::Transaction::Invoke(gw::InvokeTransaction::V1(
+                        gw::InvokeTransactionV1 {
+                            calldata: t.calldata.into_iter().map(CallParam).collect(),
+                            sender_address: ContractAddress::new_or_panic(t.contract_address),
+                            max_fee: Fee(t.max_fee),
+                            signature: t
+                                .signature
+                                .into_iter()
+                                .map(TransactionSignatureElem)
+                                .collect(),
+                            nonce: TransactionNonce(t.nonce),
+                            transaction_hash: TransactionHash(r.common.transaction_hash),
+                        },
+                    ))),
+                    _ => anyhow::bail!("Invalid invoke transaction version {}", t.version),
+                }
+                .map(|t| {
+                    (
+                        t,
+                        gw::Receipt {
+                            actual_fee: Some(Fee(r.common.actual_fee)),
+                            events: todo!(),
+                            execution_resources: todo!(),
+                            l1_to_l2_consumed_message: todo!(),
+                            l2_to_l1_messages: todo!(),
+                            transaction_hash: TransactionHash(r.common.transaction_hash),
+                            transaction_index: todo!(),
+                        },
+                    )
+                }),
+                // Transaction::Declare(t) => match version(t.version) {
+                //     0 => Ok(gw::Transaction::Declare(gw::DeclareTransaction::V0(
+                //         gw::DeclareTransactionV0V1 {
+                //             class_hash: todo!(),
+                //             max_fee: todo!(),
+                //             nonce: todo!(),
+                //             sender_address: todo!(),
+                //             signature: todo!(),
+                //             transaction_hash: todo!(),
+                //         },
+                //     ))),
+                //     1 => Ok(gw::Transaction::Declare(gw::DeclareTransaction::V1(
+                //         gw::DeclareTransactionV0V1 {
+                //             class_hash: todo!(),
+                //             max_fee: todo!(),
+                //             nonce: todo!(),
+                //             sender_address: todo!(),
+                //             signature: todo!(),
+                //             transaction_hash: todo!(),
+                //         },
+                //     ))),
+                //     2 => Ok(gw::Transaction::Declare(gw::DeclareTransaction::V2(
+                //         gw::DeclareTransactionV2 {
+                //             class_hash: todo!(),
+                //             max_fee: todo!(),
+                //             nonce: todo!(),
+                //             sender_address: todo!(),
+                //             signature: todo!(),
+                //             transaction_hash: todo!(),
+                //             compiled_class_hash: todo!(),
+                //         },
+                //     ))),
+                //     _ => anyhow::bail!("Invalid declare transaction version {}", t.version),
+                // },
+                // Transaction::Deploy(t) => Ok(gw::Transaction::Deploy(gw::DeployTransaction {
+                //     contract_address: todo!(),
+                //     contract_address_salt: todo!(),
+                //     class_hash: todo!(),
+                //     constructor_calldata: todo!(),
+                //     transaction_hash: todo!(),
+                //     version: todo!(),
+                // })),
+                // Transaction::L1Handler(t) => {
+                //     Ok(gw::Transaction::L1Handler(gw::L1HandlerTransaction {
+                //         contract_address: todo!(),
+                //         entry_point_selector: todo!(),
+                //         nonce: todo!(),
+                //         calldata: todo!(),
+                //         transaction_hash: todo!(),
+                //         version: todo!(),
+                //     }))
+                // }
+                // Transaction::DeployAccount(t) => Ok(gw::Transaction::DeployAccount(
+                //     gw::DeployAccountTransaction {
+                //         contract_address: todo!(),
+                //         transaction_hash: todo!(),
+                //         max_fee: todo!(),
+                //         version: todo!(),
+                //         signature: todo!(),
+                //         nonce: todo!(),
+                //         contract_address_salt: todo!(),
+                //         constructor_calldata: todo!(),
+                //         class_hash: todo!(),
+                //     },
+                // )),
+                _ => anyhow::bail!("TODO"),
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .into_iter()
+            .unzip();
+
+        Ok((gw_t, gw_r))
+    }
+}
+
 #[cfg(feature = "p2p")]
 #[derive(Clone, Debug)]
 pub struct BootstrapClient {
@@ -375,6 +545,7 @@ impl BootstrapClient {
                 event_count: 0,
                 event_commitment: stark_hash::Felt::ZERO,
                 protocol_version: 0,
+                starknet_version: Default::default(),
             })
             .await
     }

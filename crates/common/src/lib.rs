@@ -485,6 +485,10 @@ impl StarknetVersion {
     pub fn as_str(&self) -> Option<&str> {
         self.0.as_deref()
     }
+
+    pub fn take_inner(self) -> Option<String> {
+        self.0
+    }
 }
 
 impl From<Option<String>> for StarknetVersion {

@@ -72,6 +72,11 @@ fn fetch_block_headers(
             StarknetBlocksBlockId::Hash(block.hash),
         )?;
 
+        let starknet_version = StarknetBlocksTable::get_version(
+            &tx,
+            pathfinder_storage::StarknetBlocksBlockId::Number(block_number),
+        )?;
+
         headers.push(p2p_proto::common::BlockHeader {
             block_hash: block.hash.0,
             parent_block_hash: parent_block_hash.unwrap_or(BlockHash(Felt::ZERO)).0,
@@ -94,6 +99,7 @@ fn fetch_block_headers(
                 .ok_or(anyhow!("Event commitment missing"))?,
             // TODO: what's the protocol version?
             protocol_version: 0,
+            starknet_version: starknet_version.take_inner().unwrap_or_default(),
         });
 
         count -= 1;
@@ -487,10 +493,10 @@ mod body {
     use p2p_proto::common::{
         CommonTransactionReceiptProperties, DeclareTransaction, DeclareTransactionReceipt,
         DeployAccountTransaction, DeployAccountTransactionReceipt, DeployTransaction,
-        DeployTransactionReceipt, Event, InvokeTransaction, InvokeTransactionReceipt, MessageToL1,
-        Receipt, Transaction,
+        DeployTransactionReceipt, EntryPoint, Event, InvokeTransaction, InvokeTransactionReceipt,
+        MessageToL1, Receipt, Transaction,
     };
-    use pathfinder_common::{EntryPoint, Fee, TransactionNonce};
+    use pathfinder_common::{Fee, TransactionNonce};
     use stark_hash::Felt;
     use starknet_gateway_types::reply::transaction as gw;
 
@@ -582,7 +588,15 @@ mod body {
                 let r = Receipt::Invoke(InvokeTransactionReceipt { common });
                 let t = Transaction::Invoke(InvokeTransaction {
                     contract_address: *t.sender_address.get(),
-                    entry_point_selector: t.entry_point_selector.0,
+                    entry_point_selector: match t.entry_point_type {
+                        Some(gw::EntryPointType::External) => {
+                            EntryPoint::LegacyExternal(t.entry_point_selector.0)
+                        }
+                        Some(gw::EntryPointType::L1Handler) => {
+                            EntryPoint::LegacyL1Handler(t.entry_point_selector.0)
+                        }
+                        None => EntryPoint::EntryPoint(t.entry_point_selector.0),
+                    },
                     calldata: t.calldata.into_iter().map(|x| x.0).collect(),
                     signature: t.signature.into_iter().map(|x| x.0).collect(),
                     max_fee: t.max_fee.0,
@@ -597,7 +611,7 @@ mod body {
                 let t = Transaction::Invoke(InvokeTransaction {
                     contract_address: *t.sender_address.get(),
                     // FIXME
-                    entry_point_selector: EntryPoint::ZERO.0,
+                    entry_point_selector: EntryPoint::EntryPoint(Felt::ZERO),
                     calldata: t.calldata.into_iter().map(|x| x.0).collect(),
                     signature: t.signature.into_iter().map(|x| x.0).collect(),
                     max_fee: t.max_fee.0,
