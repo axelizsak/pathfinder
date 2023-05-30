@@ -9,9 +9,10 @@ use p2p::SyncClient;
 use p2p_proto;
 use p2p_proto::common::CompressedContractClass;
 use pathfinder_common::{
-    BlockHash, BlockId, CallParam, CasmHash, ClassHash, ContractAddress, ContractAddressSalt,
-    ContractNonce, Fee, SequencerAddress, SierraHash, StateCommitment, StorageAddress,
-    StorageValue, TransactionHash, TransactionNonce, TransactionSignatureElem, TransactionVersion,
+    BlockHash, BlockId, BlockNumber, BlockTimestamp, CallParam, CasmHash, ClassHash,
+    ContractAddress, ContractAddressSalt, ContractNonce, Fee, GasPrice, SequencerAddress,
+    SierraHash, StateCommitment, StorageAddress, StorageValue, TransactionHash, TransactionNonce,
+    TransactionSignatureElem, TransactionVersion,
 };
 use starknet_gateway_client::GatewayApi;
 use starknet_gateway_types::error::SequencerError;
@@ -56,7 +57,39 @@ impl GatewayApi for Client {
         match self {
             Client::Bootstrap { sequencer, .. } => sequencer.block(block).await,
             Client::NonPropagating { p2p_client, .. } => match block {
-                BlockId::Number(_) => todo!(),
+                BlockId::Number(n) => {
+                    let mut headers = p2p_client
+                        .block_headers(n, 1)
+                        .await
+                        .expect("TODO map error");
+                    assert_eq!(headers.len(), 1, "TODO handle len issues");
+                    let header = headers.swap_remove(0);
+
+                    let mut bodies = p2p_client
+                        .block_bodies(BlockHash(header.block_hash), 1)
+                        .await
+                        .expect("TODO map error");
+                    assert_eq!(bodies.len(), 1, "TODO handle len issues");
+                    let body = bodies.swap_remove(0);
+
+                    Ok(reply::MaybePendingBlock::Block(Block {
+                        block_hash: BlockHash(header.block_hash),
+                        block_number: BlockNumber::new_or_panic(header.block_number),
+                        gas_price: Some(GasPrice(u128::from_be_bytes(
+                            header.gas_price.to_be_bytes()[16..]
+                                .try_into()
+                                .expect("larger to smaller array is ok"),
+                        ))),
+                        parent_block_hash: BlockHash(header.parent_block_hash),
+                        sequencer_address: Some(SequencerAddress(header.sequencer_address)),
+                        state_commitment: StateCommitment(header.global_state_root),
+                        status: starknet_gateway_types::reply::Status::AcceptedOnL2, // FIXME
+                        timestamp: BlockTimestamp::new_or_panic(header.block_timestamp),
+                        transaction_receipts: todo!(),
+                        transactions: todo!(),
+                        starknet_version: todo!(),
+                    }))
+                }
                 BlockId::Latest => todo!(),
                 BlockId::Hash(_) => unreachable!("not used in sync"),
                 BlockId::Pending => {
@@ -327,11 +360,13 @@ impl BootstrapClient {
     pub async fn propagate_new_head(&self, block: &Block) -> anyhow::Result<()> {
         self.p2p_client
             .propagate_new_head(p2p_proto::common::BlockHeader {
+                block_hash: block.block_hash.0,
                 parent_block_hash: block.parent_block_hash.0,
                 block_number: block.block_number.get(),
                 global_state_root: block.state_commitment.0,
                 sequencer_address: block.sequencer_address.unwrap_or(SequencerAddress::ZERO).0,
                 block_timestamp: block.timestamp.get(),
+                gas_price: block.gas_price.unwrap_or(GasPrice::ZERO).0.into(),
 
                 transaction_count: block.transactions.len().try_into()?,
                 transaction_commitment: block.state_commitment.0,

@@ -31,41 +31,41 @@ enum Direction {
 }
 
 message GetBlockHeaders {
-  starknet.common.FieldElement start_block =
-      2;            // block hash of the starting block
-  uint64 count = 3; // how many block, at most, to retrieve from this requested
+  // starknet.common.FieldElement start_block =
+  //     2;            // block hash of the starting block
+  // TODO how am I supposed to know the hash of a block ahead of my head
+  uint64 start_block = 1;
+  uint64 count = 2; // how many block, at most, to retrieve from this requested
                     // starting point
-  uint64 size_limit = 4; // limit on size of returned messages.
+  uint64 size_limit = 3; // limit on size of returned messages.
 
-  Direction direction = 5;
+  Direction direction = 4;
 }
 
 /*
     A response to GetBlockHeaders, returning a consecutive `count` of blocks (or
    less if there are less available)
  */
-message BlockHeaders { repeated starknet.common.BlockHeader headers = 2; }
+message BlockHeaders { repeated starknet.common.BlockHeader headers = 1; }
 
 message GetBlockBodies {
-  starknet.common.FieldElement start_block =
-      2;            // block hash of the starting block
-  uint64 count = 3; // how many block, at most, to retrieve from this requested
+  starknet.common.FieldElement start_block = 1; // block hash of the starting block
+  uint64 count = 2; // how many block, at most, to retrieve from this requested
                     // starting point
-  uint64 size_limit = 4;
+  uint64 size_limit = 3;
 
-  Direction direction = 5;
+  Direction direction = 4;
 }
 
 message BlockBodies { repeated starknet.common.BlockBody block_bodies = 2; }
 
 message GetStateDiffs {
-  starknet.common.FieldElement start_block =
-      2;            // block hash of the starting block
-  uint64 count = 3; // how many block, at most, to retrieve from this requested
+  starknet.common.FieldElement start_block = 1; // block hash of the starting block
+  uint64 count = 2; // how many block, at most, to retrieve from this requested
                     // starting point
-  uint64 size_limit = 4;
+  uint64 size_limit = 3;
 
-  Direction direction = 5;
+  Direction direction = 4;
 }
 
 message StateDiffs {

@@ -10,11 +10,14 @@ use super::proto;
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::BlockHeader")]
 pub struct BlockHeader {
+    // TODO if there is no block hash field how can we verify block hash computation?
+    pub block_hash: Felt,
     pub parent_block_hash: Felt,
     pub block_number: u64,
     pub global_state_root: Felt,
     pub sequencer_address: Felt,
     pub block_timestamp: u64,
+    pub gas_price: Felt,
 
     pub transaction_count: u32,
     pub transaction_commitment: Felt,

@@ -9,19 +9,21 @@ message EthereumAddress { bytes elements = 1; }
 message PeerID { bytes id = 1; }
 
 message BlockHeader {
-  FieldElement parent_block_hash = 1;
-  uint64 block_number = 2;
-  FieldElement global_state_root = 3;
-  FieldElement sequencer_address = 4;
-  uint64 block_timestamp = 5;
+  FieldElement block_hash = 1;
+  FieldElement parent_block_hash = 2;
+  uint64 block_number = 3;
+  FieldElement global_state_root = 4;
+  FieldElement sequencer_address = 5;
+  uint64 block_timestamp = 6;
+  FieldElement gas_price = 7;
 
-  uint32 transaction_count = 6;
-  FieldElement transaction_commitment = 7;
+  uint32 transaction_count = 8;
+  FieldElement transaction_commitment = 9;
 
-  uint32 event_count = 8;
-  FieldElement event_commitment = 9;
+  uint32 event_count = 10;
+  FieldElement event_commitment = 11;
 
-  uint32 protocol_version = 10;
+  uint32 protocol_version = 12;
 }
 
 message InvokeTransaction {

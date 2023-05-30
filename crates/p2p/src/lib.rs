@@ -14,7 +14,7 @@ use libp2p::request_response::{self, RequestId, ResponseChannel};
 use libp2p::swarm::{SwarmBuilder, SwarmEvent};
 use libp2p::Multiaddr;
 use libp2p::{identify, PeerId};
-use pathfinder_common::{BlockHash, ClassHash};
+use pathfinder_common::{BlockHash, BlockNumber, ClassHash};
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 mod behaviour;
@@ -110,8 +110,9 @@ impl SyncClient {
 
     pub async fn block_headers(
         &self,
-        start_block_hash: BlockHash, // FIXME, hash to avoid DB lookup
-        num_blocks: usize,           // FIXME, use range?
+        // start_block_hash: BlockHash, // FIXME, hash to avoid DB lookup
+        start_block: BlockNumber, // TODO number or hash
+        num_blocks: usize,        // FIXME, use range?
     ) -> anyhow::Result<Vec<p2p_proto::common::BlockHeader>> {
         if num_blocks == 0 {
             return Ok(Vec::new());
@@ -123,7 +124,8 @@ impl SyncClient {
             .send_sync_request(
                 PeerId::random(), // FIXME
                 p2p_proto::sync::Request::GetBlockHeaders(p2p_proto::sync::GetBlockHeaders {
-                    start_block: start_block_hash.0,
+                    // start_block: start_block_hash.0,
+                    start_block: start_block.get(),
                     count: num_blocks.try_into().expect("Can it go wrong here?"),
                     size_limit: u64::MAX, // FIXME
                     direction: p2p_proto::sync::Direction::Forward,

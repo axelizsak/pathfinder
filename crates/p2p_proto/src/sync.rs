@@ -136,7 +136,7 @@ impl ToProtobuf<i32> for Direction {
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::sync::GetBlockHeaders")]
 pub struct GetBlockHeaders {
-    pub start_block: Felt,
+    pub start_block: u64,
     pub count: u64,
     pub size_limit: u64,
     pub direction: Direction,
