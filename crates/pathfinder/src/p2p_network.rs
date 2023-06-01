@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use p2p::libp2p::{identity::Keypair, multiaddr::Multiaddr, PeerId};
 use p2p::{Peers, SyncClient};
-use pathfinder_common::ChainId;
+use pathfinder_common::{BlockHash, BlockNumber, ChainId};
 use pathfinder_rpc::SyncState;
 use pathfinder_storage::Storage;
 use stark_hash::Felt;
@@ -134,8 +134,17 @@ async fn handle_p2p_event(
             };
             p2p_client.send_sync_response(channel, response).await;
         }
-        p2p::Event::BlockPropagation(block_propagation) => {
-            tracing::info!(?block_propagation, "Block Propagation");
+        p2p::Event::BlockPropagation { from, message } => {
+            // TODO this should be cached behind the high level p2p api
+            tracing::info!(%from, ?message, "Block Propagation");
+            match message {
+                p2p_proto::propagation::Message::NewBlockHeader(h) => p2p_client.cache_head(
+                    from,
+                    BlockNumber::new_or_panic(h.header.block_number),
+                    BlockHash(h.header.block_hash),
+                ),
+                _ => {}
+            }
         }
         p2p::Event::Test(_) => { /* Ignore me */ }
     }

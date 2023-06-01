@@ -168,7 +168,7 @@ impl StateCommitment {
 pub struct StorageCommitment(pub Felt);
 
 /// A Starknet block hash.
-#[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, Hash)]
 pub struct BlockHash(pub Felt);
 
 /// A Starknet block number.

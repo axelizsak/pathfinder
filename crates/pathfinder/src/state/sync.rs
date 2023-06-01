@@ -30,9 +30,7 @@ use stark_hash::Felt;
 use starknet_gateway_client::GatewayApi;
 use starknet_gateway_types::{
     pending::PendingData,
-    reply::{
-        state_update::DeployedContract, Block, MaybePendingBlock, PendingStateUpdate, StateUpdate,
-    },
+    reply::{state_update::DeployedContract, Block, PendingStateUpdate, StateUpdate},
 };
 
 use std::sync::Arc;
@@ -175,9 +173,15 @@ where
                     let block_hash = block.block_hash;
                     let storage_updates: usize = state_update.state_diff.storage_diffs.values().map(|storage_diffs| storage_diffs.len()).sum();
                     let update_t = std::time::Instant::now();
-                    l2_update(&mut db_conn, *block, tx_comm, ev_comm, *state_update)
+                    let block = *block;
+                    l2_update(&mut db_conn, block.clone(), tx_comm, ev_comm, *state_update)
                         .await
                         .with_context(|| format!("Update L2 state to {block_number}"))?;
+
+                    let s = sequencer.clone();
+                    // TODO use a header struct, avoid cloning
+                    s.propagate_block_header(block).await;
+
                     // This opens a short window where `pending` overlaps with `latest` in storage. Unfortuantely
                     // there is no easy way of having a transaction over both memory and database. sqlite does support
                     // multi-database transactions, but it does not work for WAL mode.
@@ -365,20 +369,14 @@ async fn update_sync_status_latest(
     starting_block_num: BlockNumber,
     chain: Chain,
 ) -> anyhow::Result<()> {
-    use pathfinder_common::BlockId;
-
     let poll_interval = head_poll_interval(chain);
 
     let starting = NumberedBlock::from((starting_block_hash, starting_block_num));
 
     loop {
-        match sequencer.block(BlockId::Latest).await {
-            Ok(MaybePendingBlock::Block(block)) => {
-                let latest = {
-                    let latest_hash = block.block_hash;
-                    let latest_num = block.block_number;
-                    NumberedBlock::from((latest_hash, latest_num))
-                };
+        match sequencer.head().await {
+            Ok((block_number, block_hash)) => {
+                let latest = { NumberedBlock::from((block_hash, block_number)) };
                 // Update the sync status.
                 match &mut *state.status.write().await {
                     sync_status @ Syncing::False(_) => {
@@ -404,9 +402,6 @@ async fn update_sync_status_latest(
                         }
                     }
                 }
-            }
-            Ok(MaybePendingBlock::Pending(_)) => {
-                tracing::error!("Latest block returned 'pending'");
             }
             Err(e) => {
                 tracing::error!(error=%e, "Failed to fetch latest block");

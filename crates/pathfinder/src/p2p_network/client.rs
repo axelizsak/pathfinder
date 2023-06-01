@@ -15,7 +15,7 @@ use pathfinder_common::{
     TransactionSignatureElem, TransactionVersion,
 };
 use starknet_gateway_client::GatewayApi;
-use starknet_gateway_types::error::SequencerError;
+use starknet_gateway_types::error::{SequencerError, StarknetError, StarknetErrorCode};
 use starknet_gateway_types::reply::{self, state_update, Block};
 use starknet_gateway_types::request::add_transaction::ContractDefinition;
 
@@ -58,17 +58,23 @@ impl GatewayApi for Client {
             Client::Bootstrap { sequencer, .. } => sequencer.block(block).await,
             Client::NonPropagating { p2p_client, .. } => match block {
                 BlockId::Number(n) => {
-                    let mut headers = p2p_client
-                        .block_headers(n, 1)
-                        .await
-                        .expect("TODO map error");
+                    let error = |_| {
+                        SequencerError::StarknetError(StarknetError {
+                            code: StarknetErrorCode::BlockNotFound,
+                            message: Default::default(),
+                        })
+                    };
+
+                    let mut headers = p2p_client.block_headers(n, 1).await.map_err(error)?;
+
                     assert_eq!(headers.len(), 1, "TODO handle len issues");
                     let header = headers.swap_remove(0);
 
                     let mut bodies = p2p_client
                         .block_bodies(BlockHash(header.block_hash), 1)
                         .await
-                        .expect("TODO map error");
+                        .map_err(error)?;
+
                     assert_eq!(bodies.len(), 1, "TODO handle len issues");
                     let body = bodies.swap_remove(0);
                     let (transactions, transaction_receipts) =
@@ -99,7 +105,7 @@ impl GatewayApi for Client {
                         },
                     }))
                 }
-                BlockId::Latest => todo!(),
+                BlockId::Latest => unreachable!("head() is used in sync and sync status instead"),
                 BlockId::Hash(_) => unreachable!("not used in sync"),
                 BlockId::Pending => {
                     unreachable!("pending should be disabled when p2p is enabled")
@@ -354,6 +360,60 @@ impl GatewayApi for Client {
                     )
                     .await
             }
+        }
+    }
+
+    /// This is a **temporary** measure to keep the sync logic unchanged
+    ///
+    /// TODO remove me when sync is changed to use the high level (ie. peer unaware) p2p API
+    /// TODO use a block header type which should be in pathfinder_common (?)
+    async fn propagate_block_header(&self, block: Block) {
+        match self {
+            Client::Bootstrap { p2p_client, .. } => {
+                p2p_client
+                    .propagate_new_header(p2p_proto::common::BlockHeader {
+                        block_hash: block.block_hash.0,
+                        parent_block_hash: block.parent_block_hash.0,
+                        block_number: block.block_number.get(),
+                        global_state_root: block.state_commitment.0,
+                        sequencer_address: block
+                            .sequencer_address
+                            .unwrap_or(SequencerAddress::ZERO)
+                            .0,
+                        block_timestamp: block.timestamp.get(),
+                        gas_price: block.gas_price.unwrap_or(GasPrice::ZERO).0.into(),
+
+                        transaction_count: block.transactions.len().try_into().expect("TODO"),
+                        transaction_commitment: block.state_commitment.0,
+
+                        // FIXME
+                        event_count: 0,
+                        event_commitment: stark_hash::Felt::ZERO,
+                        protocol_version: 0,
+                        starknet_version: Default::default(),
+                    })
+                    .await
+                    .expect("TODO");
+            }
+            Client::NonPropagating { .. } => {
+                // This is why it's called non-propagating
+            }
+        }
+    }
+
+    /// This is a **temporary** measure to keep the sync logic unchanged
+    ///
+    /// TODO remove me when sync is changed to use the high level (ie. peer unaware) p2p API
+    async fn head(&self) -> Result<(BlockNumber, BlockHash), SequencerError> {
+        match self {
+            Client::Bootstrap { sequencer, .. } => Ok(sequencer.head().await?),
+            Client::NonPropagating { p2p_client, .. } => p2p_client.latest_head().ok_or(
+                StarknetError {
+                    code: StarknetErrorCode::BlockNotFound,
+                    message: Default::default(),
+                }
+                .into(),
+            ),
         }
     }
 }
@@ -619,37 +679,5 @@ mod body {
                 },
             }
         }
-    }
-}
-
-#[cfg(feature = "p2p")]
-#[derive(Clone, Debug)]
-pub struct BootstrapClient {
-    p2p_client: SyncClient,
-}
-
-#[cfg(feature = "p2p")]
-impl BootstrapClient {
-    pub async fn propagate_new_head(&self, block: &Block) -> anyhow::Result<()> {
-        self.p2p_client
-            .propagate_new_head(p2p_proto::common::BlockHeader {
-                block_hash: block.block_hash.0,
-                parent_block_hash: block.parent_block_hash.0,
-                block_number: block.block_number.get(),
-                global_state_root: block.state_commitment.0,
-                sequencer_address: block.sequencer_address.unwrap_or(SequencerAddress::ZERO).0,
-                block_timestamp: block.timestamp.get(),
-                gas_price: block.gas_price.unwrap_or(GasPrice::ZERO).0.into(),
-
-                transaction_count: block.transactions.len().try_into()?,
-                transaction_commitment: block.state_commitment.0,
-
-                // FIXME
-                event_count: 0,
-                event_commitment: stark_hash::Felt::ZERO,
-                protocol_version: 0,
-                starknet_version: Default::default(),
-            })
-            .await
     }
 }

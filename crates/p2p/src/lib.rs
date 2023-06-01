@@ -54,6 +54,9 @@ pub fn new(
     (
         Client {
             sender: command_sender,
+            l2_heads_by_hash: HashMap::new(),
+            l2_heads_by_num: HashMap::new(),
+            latest_head: None,
         },
         event_receiver,
         MainLoop::new(swarm, command_receiver, event_sender, peers, periodic_cfg),
@@ -94,7 +97,7 @@ pub struct SyncClient {
 // the __user__, which is the sync driving algo/entity
 impl SyncClient {
     // Propagate new L2 head header
-    pub async fn propagate_new_head(
+    pub async fn propagate_new_header(
         &self,
         header: p2p_proto::common::BlockHeader,
     ) -> anyhow::Result<()> {
@@ -223,11 +226,24 @@ impl SyncClient {
     //         client: Client { sender },
     //     }
     // }
+
+    pub fn latest_head(&self) -> Option<(BlockNumber, BlockHash)> {
+        self.client.latest_head()
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Client {
     sender: mpsc::Sender<Command>,
+    // FIXME probably the worst place to cache this stuff at
+    // but let's add it for the sake of latest block retrieval
+
+    // Not used right now, should contain all heads of all peers gossiping
+    l2_heads_by_num: HashMap<BlockNumber, HashSet<PeerId>>,
+    l2_heads_by_hash: HashMap<BlockHash, HashSet<PeerId>>,
+
+    // Meant to keep the latest head from the gateway
+    latest_head: Option<(BlockNumber, BlockHash)>,
 }
 
 impl Client {
@@ -339,6 +355,30 @@ impl Client {
     pub(crate) fn for_test(&self) -> test_utils::Client {
         test_utils::Client::new(self.sender.clone())
     }
+
+    // FIXME not the right place to do that
+    pub fn cache_head(&mut self, from: PeerId, block_number: BlockNumber, block_hash: BlockHash) {
+        self.l2_heads_by_num
+            .entry(block_number)
+            .or_default()
+            .insert(from);
+        self.l2_heads_by_hash
+            .entry(block_hash)
+            .or_default()
+            .insert(from);
+
+        let x = self.latest_head;
+
+        self.latest_head = match x {
+            Some((n, _)) if n >= block_number => Some((block_number, block_hash)),
+            None => Some((block_number, block_hash)),
+            y => y,
+        };
+    }
+
+    fn latest_head(&self) -> Option<(BlockNumber, BlockHash)> {
+        self.latest_head
+    }
 }
 
 type EmptyResultSender = oneshot::Sender<anyhow::Result<()>>;
@@ -406,7 +446,10 @@ pub enum Event {
         request: p2p_proto::sync::Request,
         channel: ResponseChannel<p2p_proto::sync::Response>,
     },
-    BlockPropagation(p2p_proto::propagation::Message),
+    BlockPropagation {
+        from: PeerId,
+        message: p2p_proto::propagation::Message,
+    },
     /// For testing purposes only
     Test(TestEvent),
 }
@@ -622,16 +665,19 @@ impl MainLoop {
             })) => {
                 match p2p_proto::propagation::Message::from_protobuf_encoding(message.data.as_ref())
                 {
-                    Ok(event) => {
+                    Ok(decoded_message) => {
                         tracing::debug!(
                             "Gossipsub Event Message: [id={}][peer={}] {:?} ({} bytes)",
                             id,
                             peer_id,
-                            event,
+                            decoded_message,
                             message.data.len()
                         );
                         self.event_sender
-                            .send(Event::BlockPropagation(event))
+                            .send(Event::BlockPropagation {
+                                from: peer_id,
+                                message: decoded_message,
+                            })
                             .await?;
                     }
                     Err(e) => {
