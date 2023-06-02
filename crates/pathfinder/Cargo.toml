@@ -13,7 +13,7 @@ path = "src/lib.rs"
 [features]
 tokio-console = ["console-subscriber", "tokio/tracing"]
 rpc-full-serde = []
-p2p = ["dep:p2p", "dep:p2p_proto", "dep:bytes"]
+p2p = ["dep:p2p", "dep:p2p_proto", "dep:bytes", "dep:zstd"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -56,6 +56,7 @@ tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "time"] }
 url = "2.3.1"
 warp = "0.3.3"
+zstd = { version = "0.12", optional = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

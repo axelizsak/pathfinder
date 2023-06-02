@@ -448,13 +448,13 @@ impl GatewayApi for Client {
 }
 
 mod body {
-    use ethers::types::H256;
     use p2p_proto::common::{BlockBody, Receipt, Transaction};
     use pathfinder_common::{
         CallParam, CasmHash, ClassHash, ConstructorParam, ContractAddress, ContractAddressSalt,
         EntryPoint, Fee, TransactionHash, TransactionNonce, TransactionSignatureElem,
         TransactionVersion,
     };
+    use primitive_types::H256;
     use stark_hash::Felt;
     use starknet_gateway_types::reply::transaction::{self as gw, EntryPointType};
 

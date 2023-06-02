@@ -476,11 +476,11 @@ fn fetch_contract_classes(
     tx: rusqlite::Transaction<'_>,
     request: p2p_proto::sync::GetContractClasses,
 ) -> anyhow::Result<Vec<p2p_proto::common::CompressedContractClass>> {
-    use pathfinder_storage::ContractCodeTable;
+    use pathfinder_storage::ClassDefinitionsTable;
 
     let mut classes = Vec::new();
     for hash in request.class_hashes {
-        let class = ContractCodeTable::get_compressed_class(&tx, ClassHash(hash))?;
+        let class = ClassDefinitionsTable::get_compressed_class(&tx, ClassHash(hash))?;
         if let Some(class) = class {
             classes.push(p2p_proto::common::CompressedContractClass { class });
         }
