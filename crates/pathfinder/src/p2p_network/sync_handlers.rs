@@ -81,7 +81,7 @@ fn fetch_block_headers(
             block_hash: block.hash.0,
             parent_block_hash: parent_block_hash.unwrap_or(BlockHash(Felt::ZERO)).0,
             block_number: block.number.get(),
-            global_state_root: block.state_commmitment.0,
+            state_commitment: block.state_commmitment.0,
             sequencer_address: block.sequencer_address.0,
             block_timestamp: block.timestamp.get(),
             gas_price: block.gas_price.0.into(),
@@ -97,8 +97,6 @@ fn fetch_block_headers(
                 .event_commitment
                 .map(|ev| ev.0)
                 .ok_or(anyhow!("Event commitment missing"))?,
-            // TODO: what's the protocol version?
-            protocol_version: 0,
             starknet_version: starknet_version.take_inner().unwrap_or_default(),
         });
 
@@ -491,13 +489,13 @@ fn fetch_contract_classes(
 
 mod body {
     use p2p_proto::common::{
-        execution_resources::BuiltinInstanceCounter, CommonTransactionReceiptProperties,
-        DeclareTransaction, DeclareTransactionReceipt, DeployAccountTransaction,
-        DeployAccountTransactionReceipt, DeployTransaction, DeployTransactionReceipt, EntryPoint,
-        Event, ExecutionResources, InvokeTransaction, InvokeTransactionReceipt, MessageToL1,
-        MessageToL2, Receipt, Transaction,
+        execution_resources::BuiltinInstanceCounter, invoke_transaction::EntryPoint,
+        CommonTransactionReceiptProperties, DeclareTransaction, DeclareTransactionReceipt,
+        DeployAccountTransaction, DeployAccountTransactionReceipt, DeployTransaction,
+        DeployTransactionReceipt, Event, ExecutionResources, InvokeTransaction,
+        InvokeTransactionReceipt, MessageToL1, MessageToL2, Receipt, Transaction,
     };
-    use pathfinder_common::{Fee, L1ToL2MessageNonce, TransactionNonce};
+    use pathfinder_common::TransactionNonce;
     use stark_hash::Felt;
     use starknet_gateway_types::reply::transaction as gw;
 
@@ -505,8 +503,7 @@ mod body {
         let common = CommonTransactionReceiptProperties {
             transaction_hash: gw_t.hash().0,
             transaction_index: gw_r.transaction_index.get().try_into().expect("TODO"),
-            // TODO What if the fee is missing?
-            actual_fee: gw_r.actual_fee.unwrap_or(Fee::ZERO).0,
+            actual_fee: gw_r.actual_fee.map(|x| x.0),
             messages_sent: gw_r
                 .l2_to_l1_messages
                 .into_iter()
@@ -530,7 +527,7 @@ mod body {
                 payload: x.payload.into_iter().map(|e| e.0).collect(),
                 to_address: *x.to_address.get(),
                 entry_point_selector: x.selector.0,
-                nonce: x.nonce.unwrap_or(L1ToL2MessageNonce::ZERO).0,
+                nonce: x.nonce.map(|x| x.0),
             }),
             execution_resources: gw_r.execution_resources.map(|x| ExecutionResources {
                 builtin_instance_counter: match x.builtin_instance_counter {
@@ -617,19 +614,19 @@ mod body {
                 let r = Receipt::Invoke(InvokeTransactionReceipt { common });
                 let t = Transaction::Invoke(InvokeTransaction {
                     contract_address: *t.sender_address.get(),
-                    entry_point_selector: match t.entry_point_type {
+                    deprecated_entry_point_selector: match t.entry_point_type {
                         Some(gw::EntryPointType::External) => {
-                            EntryPoint::LegacyExternal(t.entry_point_selector.0)
+                            Some(EntryPoint::External(t.entry_point_selector.0))
                         }
                         Some(gw::EntryPointType::L1Handler) => {
-                            EntryPoint::LegacyL1Handler(t.entry_point_selector.0)
+                            Some(EntryPoint::L1Handler(t.entry_point_selector.0))
                         }
-                        None => EntryPoint::EntryPoint(t.entry_point_selector.0),
+                        None => Some(EntryPoint::Unspecified(t.entry_point_selector.0)),
                     },
                     calldata: t.calldata.into_iter().map(|x| x.0).collect(),
                     signature: t.signature.into_iter().map(|x| x.0).collect(),
                     max_fee: t.max_fee.0,
-                    // FIXME
+                    // FIXME?
                     nonce: TransactionNonce::ZERO.0,
                     version,
                 });
@@ -639,8 +636,7 @@ mod body {
                 let r = Receipt::Invoke(InvokeTransactionReceipt { common });
                 let t = Transaction::Invoke(InvokeTransaction {
                     contract_address: *t.sender_address.get(),
-                    // FIXME
-                    entry_point_selector: EntryPoint::EntryPoint(Felt::ZERO),
+                    deprecated_entry_point_selector: None,
                     calldata: t.calldata.into_iter().map(|x| x.0).collect(),
                     signature: t.signature.into_iter().map(|x| x.0).collect(),
                     max_fee: t.max_fee.0,

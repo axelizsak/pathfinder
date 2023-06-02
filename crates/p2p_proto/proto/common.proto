@@ -12,38 +12,36 @@ message BlockHeader {
   FieldElement block_hash = 1;
   FieldElement parent_block_hash = 2;
   uint64 block_number = 3;
-  FieldElement global_state_root = 4;
+  FieldElement state_commitment = 4;
   FieldElement sequencer_address = 5;
   uint64 block_timestamp = 6;
   FieldElement gas_price = 7;
-
   uint32 transaction_count = 8;
   FieldElement transaction_commitment = 9;
-
   uint32 event_count = 10;
   FieldElement event_commitment = 11;
-
-  uint32 protocol_version = 12;
-  string starknet_version = 13;
+  string starknet_version = 12;
 }
 
 message InvokeTransaction {
+  message DeprecatedEntryPoint {
+    oneof type {
+      FieldElement unspecified = 1;
+      FieldElement external = 2;
+      FieldElement l1_handler = 3;
+    }
+  }
+
   FieldElement contract_address = 1;
-  // FieldElement entry_point_selector = 2;
-  EntryPoint entry_point_selector = 2;
+  DeprecatedEntryPoint deprecated_entry_point_selector = 2;
   repeated FieldElement calldata = 3;
   repeated FieldElement signature = 4;
   FieldElement max_fee = 5;
   FieldElement nonce = 6;
   FieldElement version = 7;
-  // LegacyEntryPointType entry_point_type = 8;
 }
 
 message DeclareTransaction {
-  // TODO These can get pretty big, imo it would be better to
-  // ask peers for particular classes in a separate type
-  // ofquery
-  // ContractClass contract_class = 1;
   FieldElement contract_class_hash = 1;
   FieldElement sender_address = 2;
   FieldElement max_fee = 3;
@@ -53,9 +51,7 @@ message DeclareTransaction {
   FieldElement compiled_class_hash = 7;
 }
 
-message DeployTransaction {
-  // TODO Doesn't make sense
-  // ContractClass contract_class = 1;
+message DeprecatedDeployTransaction {
   FieldElement contract_class_hash = 1;
   FieldElement contract_address_salt = 2;
   repeated FieldElement constructor_calldata = 3;
@@ -80,25 +76,11 @@ message DeployAccountTransaction {
   FieldElement version = 7;
 }
 
-// TODO update me
-message ContractClass {
-  message EntryPoint {
-    FieldElement selector = 1;
-    FieldElement offset = 2;
-  }
-
-  repeated EntryPoint constructor_entry_points = 1;
-  repeated EntryPoint external_entry_points = 2;
-  repeated EntryPoint l1_handler_entry_points = 3;
-  string program = 4;
-  string abi = 5;
-}
-
 message Transaction {
   oneof txn {
     InvokeTransaction invoke = 1;
     DeclareTransaction declare = 2;
-    DeployTransaction deploy = 3;
+    DeprecatedDeployTransaction deploy = 3;
     L1HandlerTransaction l1_handler = 4;
     DeployAccountTransaction deploy_account = 5;
   }
@@ -161,7 +143,7 @@ message DeclareTransactionReceipt {
   CommonTransactionReceiptProperties common = 1;
 }
 
-message DeployTransactionReceipt {
+message DeprecatedDeployTransactionReceipt {
   CommonTransactionReceiptProperties common = 1;
   FieldElement contract_address = 2;
 }
@@ -176,7 +158,7 @@ message Receipt {
     InvokeTransactionReceipt invoke = 1;
     L1HandlerTransactionReceipt l1_handler = 2;
     DeclareTransactionReceipt declare = 3;
-    DeployTransactionReceipt deploy = 4;
+    DeprecatedDeployTransactionReceipt deprecated_deploy = 4;
     DeployAccountTransactionReceipt deploy_account = 5;
   }
 }
@@ -188,18 +170,4 @@ message BlockBody {
 
 message CompressedContractClass {
   bytes class = 1;
-}
-
-enum LegacyEntryPointType {
-  Unused = 0;
-  External = 1;
-  L1Handler = 2;
-}
-
-message EntryPoint {
-  oneof type {
-    FieldElement entry_point = 1;
-    FieldElement legacy_external = 2;
-    FieldElement legacy_l1_handler = 3;
-  }
 }

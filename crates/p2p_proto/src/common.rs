@@ -10,22 +10,17 @@ use super::proto;
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::BlockHeader")]
 pub struct BlockHeader {
-    // TODO if there is no block hash field how can we verify block hash computation?
     pub block_hash: Felt,
     pub parent_block_hash: Felt,
     pub block_number: u64,
-    pub global_state_root: Felt,
+    pub state_commitment: Felt,
     pub sequencer_address: Felt,
     pub block_timestamp: u64,
     pub gas_price: Felt,
-
     pub transaction_count: u32,
     pub transaction_commitment: Felt,
-
     pub event_count: u32,
     pub event_commitment: Felt,
-
-    pub protocol_version: u32,
     pub starknet_version: String,
 }
 
@@ -39,7 +34,6 @@ pub struct BlockBody {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
-
 pub enum Transaction {
     Invoke(InvokeTransaction),
     Declare(DeclareTransaction),
@@ -96,18 +90,40 @@ impl ToProtobuf<proto::common::Transaction> for Transaction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
+#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf)]
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
 #[protobuf(name = "crate::proto::common::InvokeTransaction")]
 pub struct InvokeTransaction {
     pub contract_address: Felt,
-    pub entry_point_selector: EntryPoint,
+    pub deprecated_entry_point_selector: Option<invoke_transaction::EntryPoint>,
     pub calldata: Vec<Felt>,
     pub signature: Vec<Felt>,
     pub max_fee: Felt,
     pub nonce: Felt,
     pub version: Felt,
-    // pub entry_point_type: Option<EntryPointType>,
+}
+
+impl TryFromProtobuf<crate::proto::common::InvokeTransaction> for InvokeTransaction {
+    fn try_from_protobuf(
+        input: crate::proto::common::InvokeTransaction,
+        field_name: &'static str,
+    ) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            contract_address: TryFromProtobuf::try_from_protobuf(
+                input.contract_address,
+                field_name,
+            )?,
+            deprecated_entry_point_selector: match input.deprecated_entry_point_selector {
+                Some(x) => Some(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                None => None,
+            },
+            calldata: TryFromProtobuf::try_from_protobuf(input.calldata, field_name)?,
+            signature: TryFromProtobuf::try_from_protobuf(input.signature, field_name)?,
+            max_fee: TryFromProtobuf::try_from_protobuf(input.max_fee, field_name)?,
+            nonce: TryFromProtobuf::try_from_protobuf(input.nonce, field_name)?,
+            version: TryFromProtobuf::try_from_protobuf(input.version, field_name)?,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
@@ -149,35 +165,12 @@ pub struct DeployAccountTransaction {
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
-#[protobuf(name = "crate::proto::common::DeployTransaction")]
+#[protobuf(name = "crate::proto::common::DeprecatedDeployTransaction")]
 pub struct DeployTransaction {
     pub contract_class_hash: Felt,
     pub contract_address_salt: Felt,
     pub constructor_calldata: Vec<Felt>,
     pub version: Felt,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
-#[protobuf(name = "crate::proto::common::ContractClass")]
-pub struct ContractClass {
-    pub constructor_entry_points: Vec<contract_class::EntryPoint>,
-    pub external_entry_points: Vec<contract_class::EntryPoint>,
-    pub l1_handler_entry_points: Vec<contract_class::EntryPoint>,
-    pub program: String,
-    pub abi: String,
-}
-
-pub mod contract_class {
-    use super::*;
-
-    #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
-    #[cfg_attr(feature = "test-utils", derive(Dummy))]
-    #[protobuf(name = "crate::proto::common::contract_class::EntryPoint")]
-    pub struct EntryPoint {
-        pub selector: Felt,
-        pub offset: Felt,
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
@@ -215,14 +208,35 @@ impl<T> Dummy<T> for MessageToL1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
+#[derive(Debug, Clone, PartialEq, Eq, ToProtobuf)]
 #[protobuf(name = "crate::proto::common::MessageToL2")]
 pub struct MessageToL2 {
     pub from_address: primitive_types::H160,
     pub payload: Vec<Felt>,
     pub to_address: Felt,
     pub entry_point_selector: Felt,
-    pub nonce: Felt,
+    pub nonce: Option<Felt>,
+}
+
+impl TryFromProtobuf<crate::proto::common::MessageToL2> for MessageToL2 {
+    fn try_from_protobuf(
+        input: crate::proto::common::MessageToL2,
+        field_name: &'static str,
+    ) -> Result<Self, std::io::Error> {
+        Ok(Self {
+            from_address: TryFromProtobuf::try_from_protobuf(input.from_address, field_name)?,
+            payload: TryFromProtobuf::try_from_protobuf(input.payload, field_name)?,
+            to_address: TryFromProtobuf::try_from_protobuf(input.to_address, field_name)?,
+            entry_point_selector: TryFromProtobuf::try_from_protobuf(
+                input.entry_point_selector,
+                field_name,
+            )?,
+            nonce: match input.nonce {
+                Some(x) => Some(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                None => None,
+            },
+        })
+    }
 }
 
 #[cfg(feature = "test-utils")]
@@ -285,7 +299,7 @@ pub mod execution_resources {
 pub struct CommonTransactionReceiptProperties {
     pub transaction_hash: Felt,
     pub transaction_index: u32,
-    pub actual_fee: Felt,
+    pub actual_fee: Option<Felt>,
     pub messages_sent: Vec<MessageToL1>,
     pub events: Vec<Event>,
     pub consumed_message: Option<MessageToL2>,
@@ -308,7 +322,10 @@ impl TryFromProtobuf<crate::proto::common::CommonTransactionReceiptProperties>
                 input.transaction_index,
                 field_name,
             )?,
-            actual_fee: TryFromProtobuf::try_from_protobuf(input.actual_fee, field_name)?,
+            actual_fee: match input.actual_fee {
+                Some(x) => Some(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                None => None,
+            },
             messages_sent: TryFromProtobuf::try_from_protobuf(input.messages_sent, field_name)?,
             events: TryFromProtobuf::try_from_protobuf(input.events, field_name)?,
             consumed_message: match input.consumed_message {
@@ -346,7 +363,7 @@ pub struct DeclareTransactionReceipt {
 
 #[derive(Debug, Clone, PartialEq, Eq, ToProtobuf, TryFromProtobuf)]
 #[cfg_attr(feature = "test-utils", derive(Dummy))]
-#[protobuf(name = "crate::proto::common::DeployTransactionReceipt")]
+#[protobuf(name = "crate::proto::common::DeprecatedDeployTransactionReceipt")]
 pub struct DeployTransactionReceipt {
     pub common: CommonTransactionReceiptProperties,
 
@@ -389,7 +406,7 @@ impl TryFromProtobuf<proto::common::Receipt> for Receipt {
                 proto::common::receipt::Receipt::Declare(r) => Ok(Receipt::Declare(
                     TryFromProtobuf::try_from_protobuf(r, field_name)?,
                 )),
-                proto::common::receipt::Receipt::Deploy(r) => Ok(Receipt::Deploy(
+                proto::common::receipt::Receipt::DeprecatedDeploy(r) => Ok(Receipt::Deploy(
                     TryFromProtobuf::try_from_protobuf(r, field_name)?,
                 )),
                 proto::common::receipt::Receipt::DeployAccount(r) => Ok(Receipt::DeployAccount(
@@ -409,7 +426,9 @@ impl ToProtobuf<proto::common::Receipt> for Receipt {
         let receipt = Some(match self {
             Receipt::Invoke(r) => proto::common::receipt::Receipt::Invoke(r.to_protobuf()),
             Receipt::Declare(r) => proto::common::receipt::Receipt::Declare(r.to_protobuf()),
-            Receipt::Deploy(r) => proto::common::receipt::Receipt::Deploy(r.to_protobuf()),
+            Receipt::Deploy(r) => {
+                proto::common::receipt::Receipt::DeprecatedDeploy(r.to_protobuf())
+            }
             Receipt::DeployAccount(r) => {
                 proto::common::receipt::Receipt::DeployAccount(r.to_protobuf())
             }
@@ -419,52 +438,66 @@ impl ToProtobuf<proto::common::Receipt> for Receipt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
-pub enum EntryPoint {
-    EntryPoint(Felt),
-    LegacyExternal(Felt),
-    LegacyL1Handler(Felt),
-}
+pub mod invoke_transaction {
+    use crate::proto;
+    use crate::{ToProtobuf, TryFromProtobuf};
+    #[cfg(feature = "test-utils")]
+    use fake::Dummy;
+    use stark_hash::Felt;
 
-impl TryFromProtobuf<proto::common::EntryPoint> for EntryPoint {
-    fn try_from_protobuf(
-        input: proto::common::EntryPoint,
-        field_name: &'static str,
-    ) -> Result<Self, std::io::Error> {
-        match input.r#type {
-            Some(r#type) => match r#type {
-                proto::common::entry_point::Type::EntryPoint(x) => Ok(EntryPoint::EntryPoint(
-                    TryFromProtobuf::try_from_protobuf(x, field_name)?,
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[cfg_attr(feature = "test-utils", derive(Dummy))]
+    pub enum EntryPoint {
+        Unspecified(Felt),
+        External(Felt),
+        L1Handler(Felt),
+    }
+
+    impl TryFromProtobuf<proto::common::invoke_transaction::DeprecatedEntryPoint> for EntryPoint {
+        fn try_from_protobuf(
+            input: proto::common::invoke_transaction::DeprecatedEntryPoint,
+            field_name: &'static str,
+        ) -> Result<Self, std::io::Error> {
+            match input.r#type {
+                Some(r#type) => match r#type {
+                    proto::common::invoke_transaction::deprecated_entry_point::Type::Unspecified(x) => Ok(
+                        EntryPoint::Unspecified(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                    ),
+                    proto::common::invoke_transaction::deprecated_entry_point::Type::External(x) => Ok(
+                        EntryPoint::External(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                    ),
+                    proto::common::invoke_transaction::deprecated_entry_point::Type::L1Handler(x) => Ok(
+                        EntryPoint::L1Handler(TryFromProtobuf::try_from_protobuf(x, field_name)?),
+                    ),
+                },
+                None => Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Failed to parse {field_name}: missing type field"),
                 )),
-                proto::common::entry_point::Type::LegacyExternal(x) => Ok(
-                    EntryPoint::LegacyExternal(TryFromProtobuf::try_from_protobuf(x, field_name)?),
-                ),
-                proto::common::entry_point::Type::LegacyL1Handler(x) => Ok(
-                    EntryPoint::LegacyL1Handler(TryFromProtobuf::try_from_protobuf(x, field_name)?),
-                ),
-            },
-            None => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse {field_name}: missing type field"),
-            )),
+            }
         }
     }
-}
 
-impl ToProtobuf<proto::common::EntryPoint> for EntryPoint {
-    fn to_protobuf(self) -> proto::common::EntryPoint {
-        let r#type = Some(match self {
-            EntryPoint::EntryPoint(e) => {
-                proto::common::entry_point::Type::EntryPoint(e.to_protobuf())
-            }
-            EntryPoint::LegacyExternal(e) => {
-                proto::common::entry_point::Type::LegacyExternal(e.to_protobuf())
-            }
-            EntryPoint::LegacyL1Handler(e) => {
-                proto::common::entry_point::Type::LegacyL1Handler(e.to_protobuf())
-            }
-        });
-        proto::common::EntryPoint { r#type }
+    impl ToProtobuf<proto::common::invoke_transaction::DeprecatedEntryPoint> for EntryPoint {
+        fn to_protobuf(self) -> proto::common::invoke_transaction::DeprecatedEntryPoint {
+            let r#type = Some(match self {
+                EntryPoint::Unspecified(e) => {
+                    proto::common::invoke_transaction::deprecated_entry_point::Type::Unspecified(
+                        e.to_protobuf(),
+                    )
+                }
+                EntryPoint::External(e) => {
+                    proto::common::invoke_transaction::deprecated_entry_point::Type::External(
+                        e.to_protobuf(),
+                    )
+                }
+                EntryPoint::L1Handler(e) => {
+                    proto::common::invoke_transaction::deprecated_entry_point::Type::L1Handler(
+                        e.to_protobuf(),
+                    )
+                }
+            });
+            proto::common::invoke_transaction::DeprecatedEntryPoint { r#type }
+        }
     }
 }

@@ -31,14 +31,12 @@ enum Direction {
 }
 
 message GetBlockHeaders {
-  // starknet.common.FieldElement start_block =
-  //     2;            // block hash of the starting block
-  // TODO how am I supposed to know the hash of a block ahead of my head
+  // TODO this used to be the block hash
+  // how am I supposed to know the hash of a block ahead of my head
   uint64 start_block = 1;
   uint64 count = 2; // how many block, at most, to retrieve from this requested
                     // starting point
   uint64 size_limit = 3; // limit on size of returned messages.
-
   Direction direction = 4;
 }
 

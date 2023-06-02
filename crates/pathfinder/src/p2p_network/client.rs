@@ -108,7 +108,7 @@ impl GatewayApi for Client {
                         ))),
                         parent_block_hash: BlockHash(header.parent_block_hash),
                         sequencer_address: Some(SequencerAddress(header.sequencer_address)),
-                        state_commitment: StateCommitment(header.global_state_root),
+                        state_commitment: StateCommitment(header.state_commitment),
                         status: starknet_gateway_types::reply::Status::AcceptedOnL2, // FIXME
                         timestamp: BlockTimestamp::new_or_panic(header.block_timestamp),
                         transaction_receipts,
@@ -401,7 +401,7 @@ impl GatewayApi for Client {
                         block_hash: block.block_hash.0,
                         parent_block_hash: block.parent_block_hash.0,
                         block_number: block.block_number.get(),
-                        global_state_root: block.state_commitment.0,
+                        state_commitment: block.state_commitment.0,
                         sequencer_address: block
                             .sequencer_address
                             .unwrap_or(SequencerAddress::ZERO)
@@ -415,7 +415,6 @@ impl GatewayApi for Client {
                         // FIXME
                         event_count: 0,
                         event_commitment: stark_hash::Felt::ZERO,
-                        protocol_version: 0,
                         starknet_version: Default::default(),
                     })
                     .await
@@ -466,16 +465,20 @@ mod body {
         }
 
         fn entry_point(
-            entry_point: p2p_proto::common::EntryPoint,
+            entry_point: Option<p2p_proto::common::invoke_transaction::EntryPoint>,
         ) -> (EntryPoint, Option<EntryPointType>) {
             match entry_point {
-                p2p_proto::common::EntryPoint::EntryPoint(e) => (EntryPoint(e), None),
-                p2p_proto::common::EntryPoint::LegacyExternal(e) => {
+                Some(p2p_proto::common::invoke_transaction::EntryPoint::Unspecified(e)) => {
+                    (EntryPoint(e), None)
+                }
+                Some(p2p_proto::common::invoke_transaction::EntryPoint::External(e)) => {
                     (EntryPoint(e), Some(EntryPointType::External))
                 }
-                p2p_proto::common::EntryPoint::LegacyL1Handler(e) => {
+                Some(p2p_proto::common::invoke_transaction::EntryPoint::L1Handler(e)) => {
                     (EntryPoint(e), Some(EntryPointType::L1Handler))
                 }
+                // FIXME should this be a fatal error?
+                None => (EntryPoint::ZERO, None),
             }
         }
 
@@ -488,7 +491,7 @@ mod body {
                     (Transaction::Invoke(t), Receipt::Invoke(r)) => match version(t.version) {
                         0 => {
                             let (entry_point_selector, entry_point_type) =
-                                entry_point(t.entry_point_selector);
+                                entry_point(t.deprecated_entry_point_selector);
 
                             Ok(gw::Transaction::Invoke(gw::InvokeTransaction::V0(
                                 gw::InvokeTransactionV0 {
@@ -645,7 +648,7 @@ mod body {
                 | Receipt::DeployAccount(DeployAccountTransactionReceipt { common, .. })
                 | Receipt::Invoke(InvokeTransactionReceipt { common })
                 | Receipt::L1Handler(L1HandlerTransactionReceipt { common }) => gw::Receipt {
-                    actual_fee: Some(Fee(common.actual_fee)),
+                    actual_fee: common.actual_fee.map(Fee),
                     events: common
                         .events
                         .into_iter()
@@ -685,8 +688,7 @@ mod body {
                             .collect(),
                         selector: EntryPoint(x.entry_point_selector),
                         to_address: ContractAddress::new_or_panic(x.to_address),
-                        // TODO should be optional in proto
-                        nonce: Some(L1ToL2MessageNonce(x.nonce)),
+                        nonce: x.nonce.map(L1ToL2MessageNonce),
                     }),
                     l2_to_l1_messages: common
                         .messages_sent
