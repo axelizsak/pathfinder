@@ -54,9 +54,6 @@ pub fn new(
     (
         Client {
             sender: command_sender,
-            l2_heads_by_hash: HashMap::new(),
-            l2_heads_by_num: HashMap::new(),
-            latest_head: None,
         },
         event_receiver,
         MainLoop::new(swarm, command_receiver, event_sender, peers, periodic_cfg),
@@ -91,7 +88,12 @@ impl Default for PeriodicTaskConfig {
 pub struct SyncClient {
     client: Client,
     block_propagation_topic: String,
+    peers: Arc<RwLock<peers::Peers>>,
 }
+
+// TODO stupid name
+pub type HeadSender = tokio::sync::mpsc::Sender<(BlockNumber, BlockHash)>;
+pub type HeadReceiver = tokio::sync::watch::Receiver<Option<(BlockNumber, BlockHash)>>;
 
 // FIXME make sure the api looks reasonable from the perspective of
 // the __user__, which is the sync driving algo/entity
@@ -111,6 +113,14 @@ impl SyncClient {
             .await
     }
 
+    // FIXME Pick the first connected for the time being
+    // :( not the best algo to pick a peer
+    async fn first_connected_peer(&self) -> Option<PeerId> {
+        let peers = self.peers.read().await;
+        let mut connected = peers.connected();
+        connected.next().map(Clone::clone)
+    }
+
     pub async fn block_headers(
         &self,
         // start_block_hash: BlockHash, // FIXME, hash to avoid DB lookup
@@ -121,13 +131,16 @@ impl SyncClient {
             return Ok(Vec::new());
         }
 
-        // TODO pick some peer
+        let peer_id = match self.first_connected_peer().await {
+            Some(x) => x,
+            None => return Ok(Vec::new()),
+        };
+
         let response = self
             .client
             .send_sync_request(
-                PeerId::random(), // FIXME
+                peer_id,
                 p2p_proto::sync::Request::GetBlockHeaders(p2p_proto::sync::GetBlockHeaders {
-                    // start_block: start_block_hash.0,
                     start_block: start_block.get(),
                     count: num_blocks.try_into().expect("Can it go wrong here?"),
                     size_limit: u64::MAX, // FIXME
@@ -150,11 +163,15 @@ impl SyncClient {
             return Ok(Vec::new());
         }
 
-        // TODO pick some peer
+        let peer_id = match self.first_connected_peer().await {
+            Some(x) => x,
+            None => return Ok(Vec::new()),
+        };
+
         let response = self
             .client
             .send_sync_request(
-                PeerId::random(), // FIXME
+                peer_id,
                 p2p_proto::sync::Request::GetBlockBodies(p2p_proto::sync::GetBlockBodies {
                     start_block: start_block_hash.0,
                     count: num_blocks.try_into().expect("Can it go wrong here?"),
@@ -178,11 +195,15 @@ impl SyncClient {
             return Ok(Vec::new());
         }
 
-        // TODO pick some peer
+        let peer_id = match self.first_connected_peer().await {
+            Some(x) => x,
+            None => return Ok(Vec::new()),
+        };
+
         let response = self
             .client
             .send_sync_request(
-                PeerId::random(), // FIXME
+                peer_id, // FIXME
                 p2p_proto::sync::Request::GetStateDiffs(p2p_proto::sync::GetStateDiffs {
                     start_block: start_block_hash.0,
                     count: num_blocks.try_into()?,
@@ -201,11 +222,19 @@ impl SyncClient {
         &self,
         class_hashes: Vec<ClassHash>,
     ) -> anyhow::Result<p2p_proto::sync::ContractClasses> {
-        // TODO pick some peer
+        let peer_id = match self.first_connected_peer().await {
+            Some(x) => x,
+            None => {
+                return Ok(p2p_proto::sync::ContractClasses {
+                    contract_classes: Vec::new(),
+                })
+            }
+        };
+
         let response = self
             .client
             .send_sync_request(
-                PeerId::random(), // FIXME
+                peer_id,
                 p2p_proto::sync::Request::GetContractClasses(p2p_proto::sync::GetContractClasses {
                     count: class_hashes.len().try_into()?,
                     class_hashes: class_hashes.into_iter().map(|x| x.0).collect(),
@@ -218,32 +247,11 @@ impl SyncClient {
             _ => anyhow::bail!("Response variant does not match request"),
         }
     }
-
-    // #[cfg(any(test, feature = "test-utils"))]
-    // pub fn for_tests() -> Self {
-    //     let (sender, _) = mpsc::channel(1);
-    //     Self {
-    //         client: Client { sender },
-    //     }
-    // }
-
-    pub fn latest_head(&self) -> Option<(BlockNumber, BlockHash)> {
-        self.client.latest_head()
-    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Client {
     sender: mpsc::Sender<Command>,
-    // FIXME probably the worst place to cache this stuff at
-    // but let's add it for the sake of latest block retrieval
-
-    // Not used right now, should contain all heads of all peers gossiping
-    l2_heads_by_num: HashMap<BlockNumber, HashSet<PeerId>>,
-    l2_heads_by_hash: HashMap<BlockHash, HashSet<PeerId>>,
-
-    // Meant to keep the latest head from the gateway
-    latest_head: Option<(BlockNumber, BlockHash)>,
 }
 
 impl Client {
@@ -344,40 +352,21 @@ impl Client {
             .expect("Command receiver not to be dropped");
     }
 
-    pub fn sync_handle(&self, block_propagation_topic: String) -> SyncClient {
+    pub fn sync_handle(
+        &self,
+        block_propagation_topic: String,
+        peers: Arc<RwLock<peers::Peers>>,
+    ) -> SyncClient {
         SyncClient {
             client: self.clone(),
             block_propagation_topic,
+            peers,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn for_test(&self) -> test_utils::Client {
         test_utils::Client::new(self.sender.clone())
-    }
-
-    // FIXME not the right place to do that
-    pub fn cache_head(&mut self, from: PeerId, block_number: BlockNumber, block_hash: BlockHash) {
-        self.l2_heads_by_num
-            .entry(block_number)
-            .or_default()
-            .insert(from);
-        self.l2_heads_by_hash
-            .entry(block_hash)
-            .or_default()
-            .insert(from);
-
-        let x = self.latest_head;
-
-        self.latest_head = match x {
-            Some((n, _)) if n >= block_number => Some((block_number, block_hash)),
-            None => Some((block_number, block_hash)),
-            y => y,
-        };
-    }
-
-    fn latest_head(&self) -> Option<(BlockNumber, BlockHash)> {
-        self.latest_head
     }
 }
 
@@ -778,7 +767,7 @@ impl MainLoop {
                         request_id,
                         response,
                     } => {
-                        tracing::debug!(?response, %peer, "Received block sync response");
+                        // tracing::trace!(?response, %peer, "Received block sync response");
                         if self.pending_block_sync_status_requests.remove(&request_id) {
                             // this was a status response, handle this internally
                             if let p2p_proto::sync::Response::Status(status) = response {

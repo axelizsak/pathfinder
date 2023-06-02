@@ -283,18 +283,19 @@ async fn start_p2p(
             .collect::<Result<Vec<_>, _>>()?
     };
 
-    let (_p2p_peers, p2p_client, p2p_handle) = pathfinder_lib::p2p_network::start(
-        chain_id,
-        storage,
-        sync_state,
-        listen_on,
-        &bootstrap_addresses,
-    )
-    .await?;
+    let (_p2p_peers, p2p_client, p2p_head_receiver, p2p_handle) =
+        pathfinder_lib::p2p_network::start(
+            chain_id,
+            storage,
+            sync_state,
+            listen_on,
+            &bootstrap_addresses,
+        )
+        .await?;
 
     Ok((
         p2p_handle,
-        p2p_network::client::Client::new(i_am_boot, p2p_client, sequencer),
+        p2p_network::client::Client::new(i_am_boot, p2p_client, sequencer, p2p_head_receiver),
     ))
 }
 

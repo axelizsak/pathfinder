@@ -175,18 +175,20 @@ pub async fn sync(
                     }
                 }
                 DownloadBlock::Reorg => {
-                    let some_head = head.unwrap();
-                    head = reorg(
-                        some_head,
-                        chain,
-                        chain_id,
-                        &tx_event,
-                        &sequencer,
-                        block_validation_mode,
-                        &blocks,
-                    )
-                    .await
-                    .context("L2 reorg")?;
+                    let head = match head {
+                        Some(some_head) => reorg(
+                            some_head,
+                            chain,
+                            chain_id,
+                            &tx_event,
+                            &sequencer,
+                            block_validation_mode,
+                            &blocks,
+                        )
+                        .await
+                        .context("L2 reorg")?,
+                        None => None,
+                    };
 
                     match head {
                         Some((number, hash, commitment)) => blocks.push(number, hash, commitment),
@@ -440,6 +442,8 @@ async fn download_block(
     use starknet_gateway_types::{
         error::StarknetErrorCode::BlockNotFound, reply::MaybePendingBlock,
     };
+
+    tracing::debug!(%block_number, "download_block");
 
     let result = match next_block {
         // Reuse a finalized block downloaded before pending mode exited

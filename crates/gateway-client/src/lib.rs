@@ -122,7 +122,7 @@ pub trait GatewayApi: Sync {
                 // Let's say it sort of suits the situation
                 Err(SequencerError::StarknetError(StarknetError {
                     code: StarknetErrorCode::BlockNotFound,
-                    message: Default::default(),
+                    message: "Sequencer client got a pending block instead of latest".into(),
                 }))
             }
         }

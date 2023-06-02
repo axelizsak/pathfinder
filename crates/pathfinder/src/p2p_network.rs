@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use p2p::libp2p::{identity::Keypair, multiaddr::Multiaddr, PeerId};
-use p2p::{Peers, SyncClient};
+use p2p::{HeadReceiver, HeadSender, Peers, SyncClient};
 use pathfinder_common::{BlockHash, BlockNumber, ChainId};
 use pathfinder_rpc::SyncState;
 use pathfinder_storage::Storage;
@@ -22,7 +22,12 @@ pub async fn start(
     sync_state: Arc<SyncState>,
     listen_on: Multiaddr,
     bootstrap_addresses: &[Multiaddr],
-) -> anyhow::Result<(Arc<RwLock<Peers>>, SyncClient, tokio::task::JoinHandle<()>)> {
+) -> anyhow::Result<(
+    Arc<RwLock<Peers>>,
+    SyncClient,
+    HeadReceiver,
+    tokio::task::JoinHandle<()>,
+)> {
     let keypair = Keypair::generate_ed25519();
 
     let peer_id = keypair.public().to_peer_id();
@@ -68,6 +73,15 @@ pub async fn start(
         p2p_client.subscribe_topic(&block_propagation_topic).await?;
     }
 
+    let (tx, rx) = tokio::sync::watch::channel(None);
+    let (tx2, mut rx2) = tokio::sync::mpsc::channel(1);
+
+    let _jh = tokio::task::spawn(async move {
+        while let Some(x) = rx2.recv().await {
+            _ = tx.send(Some(x));
+        }
+    });
+
     let join_handle = {
         let mut p2p_client = p2p_client.clone();
         tokio::task::spawn(
@@ -79,7 +93,7 @@ pub async fn start(
                             break;
                         }
                         Some(event) = p2p_events.recv() => {
-                            match handle_p2p_event(event, chain_id, &mut storage, &sync_state, &mut p2p_client).await {
+                            match handle_p2p_event(event, chain_id, &mut storage, &sync_state, &mut p2p_client, tx2.clone()).await {
                                 Ok(()) => {},
                                 Err(e) => { tracing::error!("Failed to handle P2P event: {}", e) },
                             }
@@ -92,8 +106,9 @@ pub async fn start(
     };
 
     Ok((
-        peers,
-        p2p_client.sync_handle(block_propagation_topic),
+        peers.clone(),
+        p2p_client.sync_handle(block_propagation_topic, peers),
+        rx,
         join_handle,
     ))
 }
@@ -104,6 +119,7 @@ async fn handle_p2p_event(
     storage: &mut Storage,
     sync_state: &SyncState,
     p2p_client: &mut p2p::Client,
+    tx: HeadSender,
 ) -> anyhow::Result<()> {
     match event {
         p2p::Event::SyncPeerConnected { peer_id }
@@ -138,11 +154,19 @@ async fn handle_p2p_event(
             // TODO this should be cached behind the high level p2p api
             tracing::info!(%from, ?message, "Block Propagation");
             match message {
-                p2p_proto::propagation::Message::NewBlockHeader(h) => p2p_client.cache_head(
-                    from,
-                    BlockNumber::new_or_panic(h.header.block_number),
-                    BlockHash(h.header.block_hash),
-                ),
+                p2p_proto::propagation::Message::NewBlockHeader(h) => {
+                    _ = tx
+                        .send((
+                            BlockNumber::new_or_panic(h.header.block_number),
+                            BlockHash(h.header.block_hash),
+                        ))
+                        .await
+                }
+                // p2p_client.cache_head(
+                //     from,
+                //     BlockNumber::new_or_panic(h.header.block_number),
+                //     BlockHash(h.header.block_hash),
+                // ),
                 _ => {}
             }
         }

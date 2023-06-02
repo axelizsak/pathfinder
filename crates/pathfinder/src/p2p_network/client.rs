@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use p2p::SyncClient;
+use p2p::{HeadReceiver, SyncClient};
 use p2p_proto;
 use p2p_proto::common::CompressedContractClass;
 use pathfinder_common::{
@@ -28,6 +28,7 @@ pub enum Client {
     NonPropagating {
         p2p_client: SyncClient,
         sequencer: starknet_gateway_client::Client,
+        head_receiver: HeadReceiver,
     },
 }
 
@@ -36,6 +37,7 @@ impl Client {
         i_am_boot: bool,
         p2p_client: SyncClient,
         sequencer: starknet_gateway_client::Client,
+        head_receiver: HeadReceiver,
     ) -> Self {
         if i_am_boot {
             Self::Bootstrap {
@@ -46,9 +48,17 @@ impl Client {
             Self::NonPropagating {
                 p2p_client,
                 sequencer,
+                head_receiver,
             }
         }
     }
+}
+
+fn sequencer_error(message: impl ToString) -> SequencerError {
+    SequencerError::StarknetError(StarknetError {
+        code: StarknetErrorCode::BlockNotFound,
+        message: message.to_string(),
+    })
 }
 
 #[async_trait::async_trait]
@@ -58,27 +68,35 @@ impl GatewayApi for Client {
             Client::Bootstrap { sequencer, .. } => sequencer.block(block).await,
             Client::NonPropagating { p2p_client, .. } => match block {
                 BlockId::Number(n) => {
-                    let error = |_| {
-                        SequencerError::StarknetError(StarknetError {
-                            code: StarknetErrorCode::BlockNotFound,
-                            message: Default::default(),
-                        })
-                    };
+                    let mut headers = p2p_client
+                        .block_headers(n, 1)
+                        .await
+                        .map_err(sequencer_error)?;
 
-                    let mut headers = p2p_client.block_headers(n, 1).await.map_err(error)?;
+                    if headers.len() != 1 {
+                        return Err(sequencer_error(format!(
+                            "Headers len for block {n} is {}, expected 1",
+                            headers.len()
+                        )));
+                    }
 
-                    assert_eq!(headers.len(), 1, "TODO handle len issues");
                     let header = headers.swap_remove(0);
 
                     let mut bodies = p2p_client
                         .block_bodies(BlockHash(header.block_hash), 1)
                         .await
-                        .map_err(error)?;
+                        .map_err(sequencer_error)?;
 
-                    assert_eq!(bodies.len(), 1, "TODO handle len issues");
+                    if bodies.len() != 1 {
+                        return Err(sequencer_error(format!(
+                            "Bodies len for block {n} is {}, expected 1",
+                            headers.len()
+                        )));
+                    }
+
                     let body = bodies.swap_remove(0);
                     let (transactions, transaction_receipts) =
-                        body::try_from_p2p(body).expect("TODO");
+                        body::try_from_p2p(body).map_err(sequencer_error)?;
 
                     Ok(reply::MaybePendingBlock::Block(Block {
                         block_hash: BlockHash(header.block_hash),
@@ -131,14 +149,22 @@ impl GatewayApi for Client {
                 let classes = p2p_client
                     .contract_classes(vec![class_hash])
                     .await
-                    .expect("TODO map error");
+                    .map_err(sequencer_error)?;
                 let mut classes = classes.contract_classes;
-                assert_eq!(
-                    classes.len(),
-                    1,
-                    "TODO where to handle insufficient data len"
-                );
+
+                if classes.len() != 1 {
+                    return Err(sequencer_error(format!(
+                        "Classes len is {}, expected 1",
+                        classes.len()
+                    )));
+                }
+
                 let CompressedContractClass { class } = classes.swap_remove(0);
+                let class = tokio::task::spawn_blocking(move || zstd::decode_all(class.as_slice()))
+                    .await
+                    .map_err(sequencer_error)?
+                    .map_err(sequencer_error)?;
+
                 Ok(class.into())
             }
         }
@@ -370,7 +396,7 @@ impl GatewayApi for Client {
     async fn propagate_block_header(&self, block: Block) {
         match self {
             Client::Bootstrap { p2p_client, .. } => {
-                p2p_client
+                match p2p_client
                     .propagate_new_header(p2p_proto::common::BlockHeader {
                         block_hash: block.block_hash.0,
                         parent_block_hash: block.parent_block_hash.0,
@@ -393,7 +419,10 @@ impl GatewayApi for Client {
                         starknet_version: Default::default(),
                     })
                     .await
-                    .expect("TODO");
+                {
+                    Ok(_) => {}
+                    Err(error) => tracing::warn!(%error, "Propagating block header failed"),
+                }
             }
             Client::NonPropagating { .. } => {
                 // This is why it's called non-propagating
@@ -407,10 +436,10 @@ impl GatewayApi for Client {
     async fn head(&self) -> Result<(BlockNumber, BlockHash), SequencerError> {
         match self {
             Client::Bootstrap { sequencer, .. } => Ok(sequencer.head().await?),
-            Client::NonPropagating { p2p_client, .. } => p2p_client.latest_head().ok_or(
+            Client::NonPropagating { head_receiver, .. } => (*head_receiver.borrow()).ok_or(
                 StarknetError {
                     code: StarknetErrorCode::BlockNotFound,
-                    message: Default::default(),
+                    message: "p2p_client latest head is None".into(),
                 }
                 .into(),
             ),
