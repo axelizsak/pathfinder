@@ -21,11 +21,11 @@ pub async fn get_block_bodies(
     spawn_blocking_get(request, storage, block_bodies).await
 }
 
-pub async fn get_state_updates(
+pub async fn get_state_diffs(
     request: p2p_proto::sync::GetStateDiffs,
     storage: &Storage,
 ) -> anyhow::Result<p2p_proto::sync::StateDiffs> {
-    spawn_blocking_get(request, storage, state_updates).await
+    spawn_blocking_get(request, storage, state_diffs).await
 }
 
 pub async fn get_classes(
@@ -134,7 +134,7 @@ fn block_bodies(
     Ok(p2p_proto::sync::BlockBodies { block_bodies })
 }
 
-fn state_updates(
+fn state_diffs(
     tx: Transaction<'_>,
     request: p2p_proto::sync::GetStateDiffs,
 ) -> anyhow::Result<p2p_proto::sync::StateDiffs> {
@@ -150,7 +150,22 @@ fn state_updates(
             break;
         }
 
-        todo!();
+        let Some(block_hash) = tx.block_id(block_number.into())?.map(|(_, h)| h) else {
+            // No such block
+            break;
+        };
+
+        let Some(state_diff) = tx.state_diff(block_number.into())? else {
+            // No such state update, shouldn't happen with a single source of truth in L2...
+            break;
+        };
+
+        let state_diff: pathfinder_storage::types::v2::state_update::StateDiff = state_diff.into();
+
+        block_state_updates.push(p2p_proto::sync::BlockStateUpdateWithHash {
+            block_hash: block_hash.0,
+            state_update: conv::state_update::from(state_diff),
+        });
 
         count -= 1;
         next_block_number = get_next_block_number(block_number, request.direction);
@@ -386,6 +401,87 @@ mod conv {
                     });
                     (t, r)
                 }
+            }
+        }
+    }
+
+    pub(super) mod state_update {
+        use p2p_proto::propagation::{
+            BlockStateUpdate, ContractDiff, DeclaredClass, DeployedContract, ReplacedClass,
+            StorageDiff,
+        };
+        use pathfinder_storage::types::v2::state_update::StateDiff;
+        use stark_hash::Felt;
+        use std::collections::HashMap;
+
+        pub fn from(x: StateDiff) -> BlockStateUpdate {
+            BlockStateUpdate {
+                contract_diffs: {
+                    // Create addr -> diff mapping with nonces set to 0
+                    let mut lut: HashMap<Felt, ContractDiff> = x
+                        .storage_diffs
+                        .into_iter()
+                        .map(|d| {
+                            (
+                                *d.address.get(),
+                                ContractDiff {
+                                    contract_address: *d.address.get(),
+                                    nonce: Felt::ZERO,
+                                    storage_diffs: d
+                                        .storage_entries
+                                        .into_iter()
+                                        .map(|e| StorageDiff {
+                                            key: *e.key.get(),
+                                            value: e.value.0,
+                                        })
+                                        .collect(),
+                                },
+                            )
+                        })
+                        .collect();
+                    // Update nonces in the mapping, create entries for missing addrs
+                    x.nonces.into_iter().for_each(|n| {
+                        let contract_address = *n.contract_address.get();
+                        let nonce = n.nonce.0;
+                        lut.entry(contract_address)
+                            .and_modify(|e| e.nonce = nonce)
+                            .or_insert(ContractDiff {
+                                contract_address,
+                                nonce,
+                                storage_diffs: vec![],
+                            });
+                    });
+                    lut.into_values().collect()
+                },
+                deployed_contracts: x
+                    .deployed_contracts
+                    .into_iter()
+                    .map(|c| DeployedContract {
+                        contract_address: *c.address.get(),
+                        class_hash: c.class_hash.0,
+                    })
+                    .collect(),
+                declared_cairo_classes: x
+                    .deprecated_declared_classes
+                    .into_iter()
+                    .map(|c| c.0)
+                    .collect(),
+                declared_classes: x
+                    .declared_classes
+                    .into_iter()
+                    .map(|c| DeclaredClass {
+                        sierra_hash: c.class_hash.0,
+                        casm_hash: c.compiled_class_hash.0,
+                    })
+                    .collect(),
+                replaced_classes: x
+                    .replaced_classes
+                    .into_iter()
+                    .map(|c| ReplacedClass {
+                        contract_address: *c.address.get(),
+                        class_hash: c.class_hash.0,
+                    })
+                    .collect(),
             }
         }
     }
