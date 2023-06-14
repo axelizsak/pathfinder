@@ -164,7 +164,7 @@ pub(super) fn state_diff(
             .storage_entries
             .push(storage_entry);
     }
-    let storage_diffs = storage_diffs.into_iter().map(|(_, diff)| diff).collect();
+    let storage_diffs = storage_diffs.into_values().collect();
 
     let mut stmt = tx
         .inner()
@@ -634,7 +634,13 @@ mod tests {
             let (contract, key, expected) = diff
                 .storage_diffs
                 .first()
-                .map(|x| (x.address, x.storage_entries[0].key, x.storage_entries[0].value))
+                .map(|x| {
+                    (
+                        x.address,
+                        x.storage_entries[0].key,
+                        x.storage_entries[0].value,
+                    )
+                })
                 .unwrap();
 
             // Valid key and contract.
