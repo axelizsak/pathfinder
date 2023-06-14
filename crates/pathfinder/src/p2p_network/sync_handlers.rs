@@ -160,8 +160,6 @@ fn state_diffs(
             break;
         };
 
-        let state_diff: pathfinder_storage::types::v2::state_update::StateDiff = state_diff.into();
-
         block_state_updates.push(p2p_proto::sync::BlockStateUpdateWithHash {
             block_hash: block_hash.0,
             state_update: conv::state_update::from(state_diff),
@@ -410,7 +408,7 @@ mod conv {
             BlockStateUpdate, ContractDiff, DeclaredClass, DeployedContract, ReplacedClass,
             StorageDiff,
         };
-        use pathfinder_storage::types::v2::state_update::StateDiff;
+        use pathfinder_storage::types::state_update::StateDiff;
         use stark_hash::Felt;
         use std::collections::HashMap;
 
@@ -462,12 +460,12 @@ mod conv {
                     })
                     .collect(),
                 declared_cairo_classes: x
-                    .deprecated_declared_classes
+                    .declared_contracts
                     .into_iter()
-                    .map(|c| c.0)
+                    .map(|c| c.class_hash.0)
                     .collect(),
                 declared_classes: x
-                    .declared_classes
+                    .declared_sierra_classes
                     .into_iter()
                     .map(|c| DeclaredClass {
                         sierra_hash: c.class_hash.0,

@@ -512,7 +512,7 @@ mod tests {
     };
     use pathfinder_merkle_tree::StorageCommitmentTree;
     use pathfinder_storage::{
-        types::state_update::{DeployedContract, StateDiff, StorageDiff},
+        types::state_update::{DeployedContract, StateDiff, StorageDiff, StorageEntry},
         JournalMode, Storage, Transaction,
     };
     use stark_hash::Felt;
@@ -925,8 +925,10 @@ mod tests {
                 .iter()
                 .map(|(storage_address, value)| StorageDiff {
                     address: test_contract_address,
-                    key: *storage_address,
-                    value: *value,
+                    storage_entries: vec![StorageEntry {
+                        key: *storage_address,
+                        value: *value,
+                    }],
                 })
                 .collect(),
             declared_contracts: vec![],

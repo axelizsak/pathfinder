@@ -3,11 +3,8 @@
 use crate::Transaction;
 use crate::{
     types::{
-        state_update::{
-            DeclaredCairoClass, DeclaredSierraClass, DeployedContract, Nonce, ReplacedClass,
-            StorageDiff,
-        },
-        v2, StateUpdate,
+        state_update::{DeclaredSierraClass, DeployedContract, StateDiff},
+        StateUpdate,
     },
     Storage,
 };
@@ -132,7 +129,7 @@ pub mod init {
 /// referring to blocks with numbers (0..N) and ("0x0".."0xN") hashes respectively.
 pub fn with_n_state_updates<F>(n: u8, f: F)
 where
-    F: FnOnce(&Storage, &Transaction<'_>, Vec<v2::StateUpdate>),
+    F: FnOnce(&Storage, &Transaction<'_>, Vec<StateUpdate>),
 {
     let storage = Storage::in_memory().unwrap();
     let mut connection = storage.connection().unwrap();

@@ -323,14 +323,15 @@ fn resolve_state_update(
     let mut storage_diffs: HashMap<_, Vec<StorageDiff>> = HashMap::new();
     for pathfinder_storage::types::state_update::StorageDiff {
         address,
-        key,
-        value,
+        storage_entries,
     } in state_diff.storage_diffs
     {
-        storage_diffs
-            .entry(address)
-            .or_default()
-            .push(StorageDiff { key, value });
+        for entry in storage_entries {
+            storage_diffs.entry(address).or_default().push(StorageDiff {
+                key: entry.key,
+                value: entry.value,
+            });
+        }
     }
 
     let deployed_contracts = state_diff

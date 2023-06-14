@@ -62,11 +62,10 @@ fn get_state_update_from_storage(
         .map(|header| header.state_commitment)
         .unwrap_or_default();
 
-    let state_diff: pathfinder_storage::types::v2::state_update::StateDiff = tx
+    let state_diff = tx
         .state_diff(block)
         .context("Fetching state diff")?
-        .context("State diff missing from database")?
-        .into();
+        .context("State diff missing from database")?;
 
     let state_update = types::StateUpdate {
         block_hash: Some(header.hash),
@@ -117,8 +116,8 @@ mod types {
         }
     }
 
-    impl From<pathfinder_storage::types::v2::StateUpdate> for StateUpdate {
-        fn from(x: pathfinder_storage::types::v2::StateUpdate) -> Self {
+    impl From<pathfinder_storage::types::StateUpdate> for StateUpdate {
+        fn from(x: pathfinder_storage::types::StateUpdate) -> Self {
             Self {
                 block_hash: x.block_hash,
                 new_root: Some(x.new_root),
@@ -183,8 +182,8 @@ mod types {
         }
     }
 
-    impl From<pathfinder_storage::types::v2::state_update::StateDiff> for StateDiff {
-        fn from(state_diff: pathfinder_storage::types::v2::state_update::StateDiff) -> Self {
+    impl From<pathfinder_storage::types::state_update::StateDiff> for StateDiff {
+        fn from(state_diff: pathfinder_storage::types::state_update::StateDiff) -> Self {
             let storage_diffs: Vec<StorageDiff> = state_diff
                 .storage_diffs
                 .into_iter()
@@ -192,9 +191,13 @@ mod types {
                 .collect();
             Self {
                 storage_diffs,
-                deprecated_declared_classes: state_diff.deprecated_declared_classes,
+                deprecated_declared_classes: state_diff
+                    .declared_contracts
+                    .into_iter()
+                    .map(|x| x.class_hash)
+                    .collect(),
                 declared_classes: state_diff
-                    .declared_classes
+                    .declared_sierra_classes
                     .into_iter()
                     .map(Into::into)
                     .collect(),
@@ -224,8 +227,8 @@ mod types {
         pub storage_entries: Vec<StorageEntry>,
     }
 
-    impl From<pathfinder_storage::types::v2::state_update::StorageDiff> for StorageDiff {
-        fn from(diff: pathfinder_storage::types::v2::state_update::StorageDiff) -> Self {
+    impl From<pathfinder_storage::types::state_update::StorageDiff> for StorageDiff {
+        fn from(diff: pathfinder_storage::types::state_update::StorageDiff) -> Self {
             Self {
                 address: diff.address,
                 storage_entries: diff.storage_entries.into_iter().map(Into::into).collect(),
@@ -246,19 +249,19 @@ mod types {
     }
 
     impl From<starknet_gateway_types::reply::state_update::StorageDiff> for StorageEntry {
-        fn from(diff: starknet_gateway_types::reply::state_update::StorageDiff) -> Self {
+        fn from(d: starknet_gateway_types::reply::state_update::StorageDiff) -> Self {
             Self {
-                key: diff.key,
-                value: diff.value,
+                key: d.key,
+                value: d.value,
             }
         }
     }
 
-    impl From<pathfinder_storage::types::v2::state_update::StorageEntry> for StorageEntry {
-        fn from(diff: pathfinder_storage::types::v2::state_update::StorageEntry) -> Self {
+    impl From<pathfinder_storage::types::state_update::StorageEntry> for StorageEntry {
+        fn from(e: pathfinder_storage::types::state_update::StorageEntry) -> Self {
             Self {
-                key: diff.key,
-                value: diff.value,
+                key: e.key,
+                value: e.value,
             }
         }
     }

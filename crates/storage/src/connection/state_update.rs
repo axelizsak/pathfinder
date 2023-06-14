@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::Context;
 use pathfinder_common::{
     BlockNumber, ClassHash, ContractAddress, ContractNonce, SierraHash, StorageAddress,
@@ -8,7 +10,7 @@ use crate::{prelude::*, BlockId};
 
 use crate::types::state_update::{
     DeclaredCairoClass, DeclaredSierraClass, DeployedContract, Nonce, ReplacedClass, StateDiff,
-    StorageDiff,
+    StorageDiff, StorageEntry,
 };
 
 /// Inserts a canonical [StateDiff] into storage.
@@ -76,13 +78,14 @@ pub(super) fn insert_canonical_state_diff(
     // Insert storage updates
     for StorageDiff {
         address,
-        key,
-        value,
+        storage_entries,
     } in &state_diff.storage_diffs
     {
-        insert_storage
-            .execute(params![&block_number, address, key, value])
-            .context("Inserting storage update")?;
+        for entry in storage_entries {
+            insert_storage
+                .execute(params![&block_number, address, &entry.key, &entry.value])
+                .context("Inserting storage update")?;
+        }
     }
 
     // Set all declared classes block numbers. Class definitions are inserted by a separate mechanism, prior
@@ -139,21 +142,29 @@ pub(super) fn state_diff(
             "SELECT contract_address, storage_address, storage_value FROM storage_updates WHERE block_number = ?"
         )
         .context("Preparing storage update query statement")?;
-    let storage_diffs = stmt
+
+    let mut storage_diffs = HashMap::new();
+    let mapped_rows = stmt
         .query_map(params![&block_number], |row| {
             let address: ContractAddress = row.get_contract_address(0)?;
             let key: StorageAddress = row.get_storage_address(1)?;
             let value: StorageValue = row.get_storage_value(2)?;
 
-            Ok(StorageDiff {
-                address,
-                key,
-                value,
-            })
+            Ok((address, StorageEntry { key, value }))
         })
-        .context("Querying storage updates")?
-        .collect::<Result<Vec<_>, _>>()
-        .context("Iterating over storage query rows")?;
+        .context("Querying storage updates")?;
+    for mapped_row in mapped_rows {
+        let (address, storage_entry) = mapped_row.context("Mapping storage entry")?;
+        storage_diffs
+            .entry(address)
+            .or_insert(StorageDiff {
+                address,
+                storage_entries: vec![],
+            })
+            .storage_entries
+            .push(storage_entry);
+    }
+    let storage_diffs = storage_diffs.into_iter().map(|(_, diff)| diff).collect();
 
     let mut stmt = tx
         .inner()
@@ -502,8 +513,10 @@ mod tests {
         let diff = StateDiff {
             storage_diffs: vec![StorageDiff {
                 address: contract_address,
-                key: StorageAddress::new_or_panic(felt_bytes!(b"storage key")),
-                value: StorageValue(felt_bytes!(b"storage value")),
+                storage_entries: vec![StorageEntry {
+                    key: StorageAddress::new_or_panic(felt_bytes!(b"storage key")),
+                    value: StorageValue(felt_bytes!(b"storage value")),
+                }],
             }],
             declared_contracts: vec![DeclaredCairoClass {
                 class_hash: cairo_hash2,
@@ -621,7 +634,7 @@ mod tests {
             let (contract, key, expected) = diff
                 .storage_diffs
                 .first()
-                .map(|x| (x.address, x.key, x.value))
+                .map(|x| (x.address, x.storage_entries[0].key, x.storage_entries[0].value))
                 .unwrap();
 
             // Valid key and contract.
