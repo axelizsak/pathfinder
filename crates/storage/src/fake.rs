@@ -5,7 +5,7 @@ use pathfinder_common::BlockHeader;
 use starknet_gateway_types::reply::transaction as gateway;
 
 /// Initialize [`Storage`] with fake blocks and state updates
-/// maintaining [limited consistency guarantees](crate::fake::init::with_n_blocks)
+/// maintaining [**limited consistency guarantees**](crate::fake::init::with_n_blocks)
 pub fn with_n_blocks(
     storage: &Storage,
     n: usize,
@@ -29,7 +29,7 @@ pub fn with_n_blocks(
     fake_data
 }
 
-/// Raw _fakers_
+/// Raw _fake state initializers_
 pub mod init {
     use crate::types::StateUpdate;
     use fake::{Fake, Faker};
@@ -38,7 +38,7 @@ pub mod init {
     };
     use starknet_gateway_types::reply::transaction as gateway;
 
-    /// Create fake blocks and state updates with __very__ limited consistency guarantees
+    /// Create fake blocks and state updates with __limited consistency guarantees__:
     /// - block headers:
     ///     - consecutive numbering starting from genesis (`0`) up to `n-1`
     ///     - parent hash wrt previous block, genesis' parent hash is `0`
@@ -87,7 +87,7 @@ pub mod init {
             ));
         }
 
-        // Fix block headers and state updates
+        // "Fix" block headers and state updates
         let (header, _, state_update) = init.get_mut(0).unwrap();
         header.parent_hash = BlockHash::ZERO;
         state_update.block_hash = Some(header.hash);
