@@ -48,6 +48,7 @@ pub(super) fn insert_canonical_state_diff(
         class_hash,
     } in &state_diff.deployed_contracts
     {
+        eprintln!("Inserting DEPLOYED: {:#?}", (address, class_hash));
         insert_contract
             .execute(params![&block_number, address, class_hash])
             .context("Inserting deployed contract")?;
@@ -59,6 +60,7 @@ pub(super) fn insert_canonical_state_diff(
         class_hash,
     } in &state_diff.replaced_classes
     {
+        eprintln!("Inserting REPLACED: {:#?}", (address, class_hash));
         insert_contract
             .execute(params![&block_number, address, class_hash])
             .context("Inserting replaced class")?;
