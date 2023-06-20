@@ -11,8 +11,6 @@ pub mod fake;
 mod params;
 mod schema;
 #[cfg(any(feature = "test-utils", test))]
-pub mod test_fixtures;
-#[cfg(any(feature = "test-utils", test))]
 pub mod test_utils;
 pub mod types;
 
