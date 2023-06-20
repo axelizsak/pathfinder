@@ -3,7 +3,7 @@
 //!
 //! This includes many trivial wrappers around [Felt] which help by providing additional type safety.
 use anyhow::Context;
-#[cfg(feature = "test-utils")]
+#[cfg(any(feature = "test-utils", test))]
 use fake::Dummy;
 use primitive_types::{H160, H256};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ pub mod event;
 pub mod hash;
 mod header;
 mod macros;
-#[cfg(feature = "test-utils")]
+#[cfg(any(feature = "test-utils", test))]
 pub mod test_utils;
 pub mod trie;
 
@@ -22,7 +22,7 @@ pub use header::{BlockHeader, BlockHeaderBuilder};
 
 /// The address of a Starknet contract.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct ContractAddress(Felt);
 
 macros::starkhash251::newtype!(ContractAddress);
@@ -40,23 +40,23 @@ impl ContractAddress {
 /// A nonce that is associated with a particular deployed Starknet contract
 /// distinguishing it from other contracts that use the same contract class.
 #[derive(Copy, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct ContractNonce(pub Felt);
 
 /// The salt of a Starknet contract address.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct ContractAddressSalt(pub Felt);
 
 /// The hash of a Starknet contract. This is a hash over a class'
 /// deployment properties e.g. code and ABI.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct ClassHash(pub Felt);
 
 /// The hash of a Starknet Sierra class.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct SierraHash(pub Felt);
 
 macros::starkhash251::newtype!(SierraHash);
@@ -64,7 +64,7 @@ macros::starkhash251::deserialization!(SierraHash);
 
 /// The hash of a Starknet Cairo assembly class.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct CasmHash(pub Felt);
 
 macros::starkhash251::newtype!(CasmHash);
@@ -72,7 +72,7 @@ macros::starkhash251::deserialization!(CasmHash);
 
 /// The root of a class commitment tree.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Default)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct ClassCommitment(pub Felt);
 
 macros::starkhash251::newtype!(ClassCommitment);
@@ -108,7 +108,7 @@ pub struct ContractClass {
 
 /// Entry point of a Starknet `call`.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct EntryPoint(pub Felt);
 
 impl EntryPoint {
@@ -132,12 +132,12 @@ pub struct ByteCodeOffset(pub Felt);
 
 /// A single parameter passed to a Starknet `call`.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct CallParam(pub Felt);
 
 /// A single parameter passed to a Starknet contract constructor.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct ConstructorParam(pub Felt);
 
 /// A single result value of a Starknet `call`.
@@ -146,7 +146,7 @@ pub struct CallResultValue(pub Felt);
 
 /// The address of a storage element for a Starknet contract.
 #[derive(Copy, Clone, PartialEq, Eq, Serialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct StorageAddress(Felt);
 
 macros::starkhash251::newtype!(StorageAddress);
@@ -154,14 +154,14 @@ macros::starkhash251::deserialization!(StorageAddress);
 
 /// The value of a storage element for a Starknet contract.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, PartialOrd, Ord)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct StorageValue(pub Felt);
 
 /// The commitment for the state of a Starknet block.
 ///
 /// Before Starknet v0.11.0 this was equivalent to [StorageCommitment].
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct StateCommitment(pub Felt);
 
 impl StateCommitment {
@@ -195,12 +195,12 @@ impl StateCommitment {
 ///
 /// Before Starknet v0.11.0 this was equivalent to [StateCommitment].
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct StorageCommitment(pub Felt);
 
 /// A Starknet block hash.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, Default, Hash)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct BlockHash(pub Felt);
 
 /// A Starknet block number.
@@ -233,17 +233,17 @@ macros::i64_backed_u64::serdes!(BlockTimestamp);
 
 /// A Starknet events commitment of a block.
 #[derive(Copy, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct EventCommitment(pub Felt);
 
 /// A Starknet transactions commitment of a block.
 #[derive(Copy, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct TransactionCommitment(pub Felt);
 
 /// A Starknet transaction hash.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct TransactionHash(pub Felt);
 
 /// A Starknet transaction index.
@@ -255,52 +255,52 @@ macros::i64_backed_u64::serdes!(TransactionIndex);
 
 /// A single element of a signature used to secure a Starknet transaction.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct TransactionSignatureElem(pub Felt);
 
 /// A nonce that is added to an L1 to L2 message in a Starknet transaction.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct L1ToL2MessageNonce(pub Felt);
 
 /// A single element of the payload of an L1 to L2 message in a Starknet transaction.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct L1ToL2MessagePayloadElem(pub Felt);
 
 /// A single element of the payload of an L2 to L1 message in a Starknet transaction.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct L2ToL1MessagePayloadElem(pub Felt);
 
 /// Starknet transaction event data.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct EventData(pub Felt);
 
 /// Starknet transaction event key.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, Hash)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct EventKey(pub Felt);
 
 /// Starknet sequencer address.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct SequencerAddress(pub Felt);
 
 /// Starknet fee value.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct Fee(pub Felt);
 
 /// Starknet gas price.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct GasPrice(pub u128);
 
 // Starknet transaction nonce.
 #[derive(Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct TransactionNonce(pub Felt);
 
 /// Starknet transaction version.
@@ -396,7 +396,7 @@ impl std::ops::SubAssign<u64> for BlockNumber {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct EthereumAddress(pub H160);
 
-#[cfg(feature = "test-utils")]
+#[cfg(any(feature = "test-utils", test))]
 impl<T> Dummy<T> for EthereumAddress {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_: &T, rng: &mut R) -> Self {
         Self(H160::random_using(rng))
@@ -504,7 +504,7 @@ impl std::fmt::Display for Chain {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct StarknetVersion(String);
 
 impl StarknetVersion {

@@ -1,7 +1,6 @@
 //! Create fake blockchain data for test purposes
-use crate::types::{state_update, StateUpdate};
+use crate::types::StateUpdate;
 use crate::Storage;
-use fake::{Fake, Faker};
 use pathfinder_common::BlockHeader;
 use rand::Rng;
 use starknet_gateway_types::reply::transaction as gateway;
@@ -79,15 +78,12 @@ pub mod init {
 
     use super::StorageInitializer;
     use crate::types::{
-        state_update::{
-            DeployedContract, Nonce, ReplacedClass, StateDiff, StorageDiff, StorageEntry,
-        },
+        state_update::{ReplacedClass, StateDiff, StorageDiff, StorageEntry},
         StateUpdate,
     };
     use fake::{Fake, Faker};
     use pathfinder_common::{
-        BlockHash, BlockHeader, BlockNumber, ClassHash, ContractAddress, StateCommitment,
-        TransactionIndex,
+        BlockHash, BlockHeader, BlockNumber, ContractAddress, StateCommitment, TransactionIndex,
     };
     use rand::Rng;
     use starknet_gateway_types::reply::transaction as gateway;
@@ -173,7 +169,9 @@ pub mod init {
             ));
         }
 
+        //
         // "Fix" block headers and state updates
+        //
         let (header, _, state_update) = init.get_mut(0).unwrap();
         header.parent_hash = BlockHash::ZERO;
         state_update.old_root = StateCommitment::ZERO;

@@ -2,11 +2,11 @@ use crate::{
     BlockHash, BlockNumber, BlockTimestamp, ClassCommitment, EventCommitment, GasPrice,
     SequencerAddress, StarknetVersion, StateCommitment, StorageCommitment, TransactionCommitment,
 };
-#[cfg(feature = "test-utils")]
+#[cfg(any(feature = "test-utils", test))]
 use fake::Dummy;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "test-utils", derive(Dummy))]
+#[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct BlockHeader {
     pub hash: BlockHash,
     pub parent_hash: BlockHash,
