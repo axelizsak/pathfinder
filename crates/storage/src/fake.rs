@@ -147,6 +147,7 @@ pub mod init {
                         let contracts_with_storage_diffs = Faker
                             .fake_with_rng::<Vec<ContractAddress>, _>(rng)
                             .into_iter();
+
                         StateDiff {
                             storage_diffs: {
                                 contracts_with_storage_diffs
@@ -159,9 +160,7 @@ pub mod init {
                                             _,
                                         >(
                                             rng
-                                        )
-                                        .into_iter()
-                                        .collect(),
+                                        ),
                                     })
                                     .collect()
                             },

@@ -213,7 +213,7 @@ mod types {
 
     /// L2 storage diff of a contract.
     #[serde_with::serde_as]
-    #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
     #[cfg_attr(any(test, feature = "rpc-full-serde"), derive(serde::Deserialize))]
     #[serde(deny_unknown_fields)]
     pub struct StorageDiff {
@@ -233,7 +233,7 @@ mod types {
 
     /// A key-value entry of a storage diff.
     #[serde_with::serde_as]
-    #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
     #[cfg_attr(any(test, feature = "rpc-full-serde"), derive(serde::Deserialize))]
     #[serde(deny_unknown_fields)]
     pub struct StorageEntry {
@@ -416,7 +416,6 @@ mod tests {
         let storage = pathfinder_storage::Storage::in_memory().unwrap();
         let mut connection = storage.connection().unwrap();
         let tx = connection.transaction().unwrap();
-        // let state_updates = pathfinder_storage::test_fixtures::init::with_n_state_updates(&tx, 3);
         let state_updates = pathfinder_storage::fake::with_n_blocks(&storage, 3)
             .into_iter()
             .map(|(_, _, x)| x.into())
@@ -427,7 +426,6 @@ mod tests {
         let sync_state = std::sync::Arc::new(crate::SyncState::default());
         let sequencer = starknet_gateway_client::Client::new(Chain::Testnet).unwrap();
         let context = RpcContext::new(storage, sync_state, ChainId::TESTNET, sequencer);
-        // let state_updates = state_updates.into_iter().map(Into::into).collect();
 
         (state_updates, context)
     }
@@ -445,15 +443,42 @@ mod tests {
         f(test_case_idx, &result);
     }
 
+    impl StateUpdate {
+        pub fn sort(self) -> Self {
+            use std::collections::BTreeSet;
+
+            Self {
+                state_diff: StateDiff {
+                    storage_diffs: self
+                        .state_diff
+                        .storage_diffs
+                        .into_iter()
+                        .map(|mut x| {
+                            x.storage_entries.sort_unstable();
+                            StorageDiff {
+                                address: x.address,
+                                storage_entries: x.storage_entries,
+                            }
+                        })
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect(),
+                    ..self.state_diff
+                },
+                ..self
+            }
+        }
+    }
+
     /// Common assertion type for most of the test cases
     fn assert_ok(expected: types::StateUpdate) -> TestCaseHandler {
-        use pretty_assertions::assert_eq;
-        Box::new(move |i: usize, result| {
-            assert_matches!(result, Ok(actual) => assert_eq!(
-                *actual,
-                expected,
-                "test case {i}"
-            ), "test case {i}");
+        let expected = expected.sort();
+
+        Box::new(move |i: usize, result| match result {
+            Ok(actual) => {
+                pretty_assertions::assert_eq!(actual.clone().sort(), expected, "test case {i}")
+            }
+            Err(_) => panic!("test case {i}"),
         })
     }
 

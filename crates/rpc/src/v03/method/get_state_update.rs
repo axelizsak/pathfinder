@@ -218,7 +218,7 @@ mod types {
 
     /// L2 storage diff of a contract.
     #[serde_with::serde_as]
-    #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
     #[cfg_attr(any(test, feature = "rpc-full-serde"), derive(serde::Deserialize))]
     #[serde(deny_unknown_fields)]
     pub struct StorageDiff {
@@ -238,7 +238,7 @@ mod types {
 
     /// A key-value entry of a storage diff.
     #[serde_with::serde_as]
-    #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+    #[derive(Clone, Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
     #[cfg_attr(any(test, feature = "rpc-full-serde"), derive(serde::Deserialize))]
     #[serde(deny_unknown_fields)]
     pub struct StorageEntry {
@@ -520,13 +520,41 @@ mod tests {
 
     /// Common assertion type for most of the test cases
     fn assert_ok(expected: types::StateUpdate) -> TestCaseHandler {
-        Box::new(move |i: usize, result| {
-            assert_matches!(result, Ok(actual) => pretty_assertions::assert_eq!(
-                *actual,
-                expected,
-                "test case {i}"
-            ), "test case {i}");
+        let expected = expected.sort();
+
+        Box::new(move |i: usize, result| match result {
+            Ok(actual) => {
+                pretty_assertions::assert_eq!(actual.clone().sort(), expected, "test case {i}")
+            }
+            Err(_) => panic!("test case {i}"),
         })
+    }
+
+    impl StateUpdate {
+        pub fn sort(self) -> Self {
+            use std::collections::BTreeSet;
+
+            Self {
+                state_diff: StateDiff {
+                    storage_diffs: self
+                        .state_diff
+                        .storage_diffs
+                        .into_iter()
+                        .map(|mut x| {
+                            x.storage_entries.sort_unstable();
+                            StorageDiff {
+                                address: x.address,
+                                storage_entries: x.storage_entries,
+                            }
+                        })
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect(),
+                    ..self.state_diff
+                },
+                ..self
+            }
+        }
     }
 
     impl PartialEq for GetStateUpdateError {
