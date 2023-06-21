@@ -1023,4 +1023,8 @@ mod tests {
             }
         }
     }
+
+    mod classes {
+        // TODO once Response::Classes stabilized
+    }
 }
