@@ -68,14 +68,12 @@ pub fn with_n_blocks_and_rng(
 
 /// Raw _fake state initializers_
 pub mod init {
-    use std::collections::{BTreeMap, BTreeSet};
-
     use super::StorageInitializer;
     use crate::types::{
         state_update::{Nonce, ReplacedClass, StateDiff, StorageDiff, StorageEntry},
         StateUpdate,
     };
-    use fake::{Dummy, Fake, Faker};
+    use fake::{Fake, Faker};
     use pathfinder_common::test_utils::fake_non_empty_with_rng;
     use pathfinder_common::{
         BlockHash, BlockHeader, BlockNumber, ContractAddress, StateCommitment, TransactionIndex,
@@ -91,10 +89,13 @@ pub mod init {
     /// - block bodies:
     ///     - transaction indices within a block
     ///     - transaction hashes in respective receipts
+    ///     - at least 1 transaction with receipt per block
     /// - state updates:
     ///     - block hashes
-    ///     - old roots wrt previous state update, genesis' old root is `0`\
+    ///     - old roots wrt previous state update, genesis' old root is `0`
     ///     - replaced classes for block N point to some deployed contracts from block N-1
+    ///     - each storage diff has its respective nonce update
+    ///     - storage entries contrain at least 1 element
     ///     
     pub fn with_n_blocks(n: usize) -> StorageInitializer {
         let mut rng = rand::thread_rng();
@@ -148,22 +149,6 @@ pub mod init {
                             .into_iter();
                         StateDiff {
                             storage_diffs: {
-                                // Sorted, which will save us sorting later on if comparing with what was retrieved from storage
-                                // Faker
-                                //     .fake_with_rng::<BTreeSet<ContractAddress>, _>(rng)
-                                //     .into_iter()
-                                //     .map(|address| StorageDiff {
-                                //         address,
-                                //         // Disallow empty storage entries
-                                //         storage_entries: fake_non_empty_with_rng::<
-                                //             BTreeSet<StorageEntry>,
-                                //             _,
-                                //         >(rng)
-                                //         .into_iter()
-                                //         .collect(),
-                                //     })
-                                //     .collect()
-
                                 contracts_with_storage_diffs
                                     .clone()
                                     .map(|address| StorageDiff {
