@@ -171,40 +171,42 @@ pub mod init {
         //
         // "Fix" block headers and state updates
         //
-        let (header, _, state_update) = init.get_mut(0).unwrap();
-        header.parent_hash = BlockHash::ZERO;
-        state_update.old_root = StateCommitment::ZERO;
+        if !init.is_empty() {
+            let (header, _, state_update) = init.get_mut(0).unwrap();
+            header.parent_hash = BlockHash::ZERO;
+            state_update.old_root = StateCommitment::ZERO;
 
-        for i in 1..n {
-            let (parent_hash, old_root, deployed_in_parent) = init
-                .get(i - 1)
-                .map(|(h, _, state_update)| {
-                    (
-                        h.hash,
-                        h.state_commitment,
-                        state_update.state_diff.deployed_contracts.clone(),
-                    )
-                })
-                .unwrap();
-            let (header, _, state_update) = init.get_mut(i).unwrap();
-
-            header.parent_hash = parent_hash;
-            state_update.old_root = old_root;
-
-            let num_deployed_in_parent = deployed_in_parent.len();
-
-            if num_deployed_in_parent > 0 {
-                // Add some replaced classes
-                let num_replaced = rng.gen_range(1..=num_deployed_in_parent);
-                use rand::seq::SliceRandom;
-
-                state_update.state_diff.replaced_classes = deployed_in_parent
-                    .choose_multiple(rng, num_replaced)
-                    .map(|x| ReplacedClass {
-                        address: x.address,
-                        class_hash: Faker.fake_with_rng(rng),
+            for i in 1..n {
+                let (parent_hash, old_root, deployed_in_parent) = init
+                    .get(i - 1)
+                    .map(|(h, _, state_update)| {
+                        (
+                            h.hash,
+                            h.state_commitment,
+                            state_update.state_diff.deployed_contracts.clone(),
+                        )
                     })
-                    .collect()
+                    .unwrap();
+                let (header, _, state_update) = init.get_mut(i).unwrap();
+
+                header.parent_hash = parent_hash;
+                state_update.old_root = old_root;
+
+                let num_deployed_in_parent = deployed_in_parent.len();
+
+                if num_deployed_in_parent > 0 {
+                    // Add some replaced classes
+                    let num_replaced = rng.gen_range(1..=num_deployed_in_parent);
+                    use rand::seq::SliceRandom;
+
+                    state_update.state_diff.replaced_classes = deployed_in_parent
+                        .choose_multiple(rng, num_replaced)
+                        .map(|x| ReplacedClass {
+                            address: x.address,
+                            class_hash: Faker.fake_with_rng(rng),
+                        })
+                        .collect()
+                }
             }
         }
 
