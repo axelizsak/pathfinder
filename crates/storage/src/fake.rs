@@ -72,7 +72,7 @@ pub mod init {
 
     use super::StorageInitializer;
     use crate::types::{
-        state_update::{ReplacedClass, StateDiff, StorageDiff, StorageEntry},
+        state_update::{Nonce, ReplacedClass, StateDiff, StorageDiff, StorageEntry},
         StateUpdate,
     };
     use fake::{Dummy, Fake, Faker};
@@ -142,27 +142,54 @@ pub mod init {
                     new_root,
                     // Will be fixed in the next loop
                     old_root: StateCommitment::ZERO,
-                    state_diff: StateDiff {
-                        storage_diffs: {
-                            // Sorted, which will save us sorting later on if comparing with what was retrieved from storage
-                            Faker
-                                .fake_with_rng::<BTreeSet<ContractAddress>, _>(rng)
-                                .into_iter()
-                                .map(|address| StorageDiff {
-                                    address,
-                                    // Disallow empty storage entries
-                                    storage_entries: fake_non_empty_with_rng::<
-                                        BTreeSet<StorageEntry>,
-                                        _,
-                                    >(rng)
-                                    .into_iter()
-                                    .collect(),
+                    state_diff: {
+                        let contracts_with_storage_diffs = Faker
+                            .fake_with_rng::<Vec<ContractAddress>, _>(rng)
+                            .into_iter();
+                        StateDiff {
+                            storage_diffs: {
+                                // Sorted, which will save us sorting later on if comparing with what was retrieved from storage
+                                // Faker
+                                //     .fake_with_rng::<BTreeSet<ContractAddress>, _>(rng)
+                                //     .into_iter()
+                                //     .map(|address| StorageDiff {
+                                //         address,
+                                //         // Disallow empty storage entries
+                                //         storage_entries: fake_non_empty_with_rng::<
+                                //             BTreeSet<StorageEntry>,
+                                //             _,
+                                //         >(rng)
+                                //         .into_iter()
+                                //         .collect(),
+                                //     })
+                                //     .collect()
+
+                                contracts_with_storage_diffs
+                                    .clone()
+                                    .map(|address| StorageDiff {
+                                        address,
+                                        // Disallow empty storage entries
+                                        storage_entries: fake_non_empty_with_rng::<
+                                            Vec<StorageEntry>,
+                                            _,
+                                        >(
+                                            rng
+                                        )
+                                        .into_iter()
+                                        .collect(),
+                                    })
+                                    .collect()
+                            },
+                            // Will be fixed in the next loop
+                            replaced_classes: vec![],
+                            nonces: contracts_with_storage_diffs
+                                .map(|contract_address| Nonce {
+                                    contract_address,
+                                    nonce: Faker.fake_with_rng(rng),
                                 })
-                                .collect()
-                        },
-                        // Will be fixed in the next loop
-                        replaced_classes: vec![],
-                        ..Faker.fake_with_rng(rng)
+                                .collect(),
+                            ..Faker.fake_with_rng(rng)
+                        }
                     },
                 },
             ));

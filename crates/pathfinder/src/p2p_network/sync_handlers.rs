@@ -12,13 +12,13 @@ const MAX_BODIES_COUNT: u64 = 100;
 const MAX_STATE_UPDATES_COUNT: u64 = 100;
 
 #[cfg(test)]
-const MAX_COUNT: u64 = 10;
+const MAX_COUNT_IN_TESTS: u64 = 10;
 #[cfg(test)]
-const MAX_HEADERS_COUNT: u64 = MAX_COUNT;
+const MAX_HEADERS_COUNT: u64 = MAX_COUNT_IN_TESTS;
 #[cfg(test)]
-const MAX_BODIES_COUNT: u64 = MAX_COUNT;
+const MAX_BODIES_COUNT: u64 = MAX_COUNT_IN_TESTS;
 #[cfg(test)]
-const MAX_STATE_UPDATES_COUNT: u64 = MAX_COUNT;
+const MAX_STATE_UPDATES_COUNT: u64 = MAX_COUNT_IN_TESTS;
 
 pub async fn get_block_headers(
     request: p2p_proto::sync::GetBlockHeaders,
@@ -635,7 +635,7 @@ mod tests {
                 fake::{with_n_blocks_and_rng, StorageInitializer},
                 Storage,
             };
-            pub const MAX_NUM_BLOCKS: u64 = super::super::super::MAX_COUNT * 2;
+            pub const MAX_NUM_BLOCKS: u64 = super::super::super::MAX_COUNT_IN_TESTS * 2;
             pub const I64_MAX: u64 = i64::MAX as u64;
             pub type SeededStorage = once_cell::sync::OnceCell<(Storage, StorageInitializer)>;
 
@@ -665,7 +665,7 @@ mod tests {
 
         /// Find overlapping range between the DB and the request
         mod overlapping {
-            use super::super::super::MAX_COUNT;
+            use super::super::super::MAX_COUNT_IN_TESTS;
             use super::fixtures::MAX_NUM_BLOCKS;
             use pathfinder_storage::fake::{StorageInitializer, StorageInitializerItem};
 
@@ -677,7 +677,7 @@ mod tests {
                 from_db
                     .into_iter()
                     .skip(start_block.try_into().unwrap())
-                    .take(std::cmp::min(count, MAX_COUNT).try_into().unwrap())
+                    .take(std::cmp::min(count, MAX_COUNT_IN_TESTS).try_into().unwrap())
             }
 
             pub fn backward(
@@ -687,8 +687,8 @@ mod tests {
                 num_blocks: u64,
             ) -> impl Iterator<Item = StorageInitializerItem> {
                 if start_block >= num_blocks {
-                    // The is no overlapping range and we want to keep the iterator type in this
-                    // branch consistent
+                    // The is no overlapping range but we want to keep the iterator type in this
+                    // branch type-consistent
                     from_db.clear();
                 }
 
@@ -696,7 +696,7 @@ mod tests {
                     .into_iter()
                     .take((start_block + 1).try_into().unwrap())
                     .rev()
-                    .take(std::cmp::min(count, MAX_COUNT).try_into().unwrap())
+                    .take(std::cmp::min(count, MAX_COUNT_IN_TESTS).try_into().unwrap())
             }
         }
 
@@ -1025,6 +1025,95 @@ mod tests {
 
                 //     prop_assert_eq!(from_p2p, from_db)
                 // }
+            }
+        }
+
+        mod state_diffs {
+            use super::super::{state_diffs, Direction};
+            use super::fixtures::storage_with_seed2;
+            use super::overlapping;
+            use crate::p2p_network::client::conv::state_diff;
+            use pathfinder_storage::types::state_update::StateDiff;
+            use proptest::prelude::*;
+
+            proptest! {
+                #[test]
+                fn forward((start, count, seed, num_blocks) in super::strategy::forward2()) {
+                    let (storage, from_db) = storage_with_seed2(seed, num_blocks);
+                    let start_hash = match from_db.get(usize::try_from(start).unwrap()).map(|x| x.0.hash) {
+                        Some(h) => h,
+                        None => {
+                            // Assume default as an invalid hash but make sure it really is
+                            prop_assume!(from_db.iter().all(|x| x.0.hash != Default::default()));
+                            Default::default()
+                        },
+                    };
+                    let from_db = overlapping::forward(from_db, start, count).map(|(_, _, state_update)|
+                        (state_update.block_hash.unwrap_or_default(), state_update.state_diff.sort())).collect::<Vec<_>>();
+
+                    let request = p2p_proto::sync::GetStateDiffs {
+                        start_block: start_hash.0,
+                        count,
+                        // FIXME unused for now, will likely trigger a failure once it is really used in prod code
+                        size_limit: 0,
+                        direction: Direction::Forward
+                    };
+
+                    let mut connection = storage.connection().unwrap();
+                    let tx = connection.transaction().unwrap();
+
+                    let from_p2p = state_diffs(tx, request)
+                        .unwrap()
+                        .block_state_updates
+                        .into_iter()
+                        .map(|state_update| {
+                            let (h, su) = state_diff::from_p2p(state_update);
+                            (h, StateDiff::from(su).sort())
+                        }).collect::<Vec<_>>();
+
+                    prop_assert_eq!(from_p2p, from_db)
+                    // pretty_assertions::assert_eq!(from_p2p, from_db)
+                }
+            }
+
+            proptest! {
+                #[test]
+                fn backward((start, count, seed, num_blocks) in super::strategy::backward2()) {
+                    let (storage, from_db) = storage_with_seed2(seed, num_blocks);
+                    let start_hash = match from_db.get(usize::try_from(start).unwrap()).map(|x| x.0.hash) {
+                        Some(h) => h,
+                        None => {
+                            // Assume default as an invalid hash but make sure it really is
+                            prop_assume!(from_db.iter().all(|x| x.0.hash != Default::default()));
+                            Default::default()
+                        },
+                    };
+                    let from_db = overlapping::backward(from_db, start, count, num_blocks).map(|(_, _, state_update)|
+                        (state_update.block_hash.unwrap_or_default(), state_update.state_diff.sort())).collect::<Vec<_>>();
+
+                    let request = p2p_proto::sync::GetStateDiffs {
+                        start_block: start_hash.0,
+                        count,
+                        // FIXME unused for now, will likely trigger a failure once it is really used in prod code
+                        size_limit: 0,
+                        direction: Direction::Backward
+                    };
+
+                    let mut connection = storage.connection().unwrap();
+                    let tx = connection.transaction().unwrap();
+
+                    let from_p2p = state_diffs(tx, request)
+                        .unwrap()
+                        .block_state_updates
+                        .into_iter()
+                        .map(|state_update| {
+                            let (h, su) = state_diff::from_p2p(state_update);
+                            (h, StateDiff::from(su).sort())
+                        }).collect::<Vec<_>>();
+
+                    prop_assert_eq!(from_p2p, from_db)
+                    // pretty_assertions::assert_eq!(from_p2p, from_db)
+                }
             }
         }
     }

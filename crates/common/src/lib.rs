@@ -39,7 +39,7 @@ impl ContractAddress {
 
 /// A nonce that is associated with a particular deployed Starknet contract
 /// distinguishing it from other contracts that use the same contract class.
-#[derive(Copy, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, Deserialize, Serialize, PartialOrd, Ord)]
 #[cfg_attr(any(feature = "test-utils", test), derive(Dummy))]
 pub struct ContractNonce(pub Felt);
 
