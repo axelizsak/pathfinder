@@ -100,13 +100,18 @@ Examples:
     #[clap(flatten)]
     network: NetworkCli,
 
-    #[arg(
-        long = "poll-pending",
-        long_help = "Enable polling pending block",
-        action = clap::ArgAction::Set,
-        default_value = "false",
-        env = "PATHFINDER_POLL_PENDING", 
+    /// poll_pending and p2p_boot are mutually exclusive
+    #[cfg_attr(
+        not(feature = "p2p"),
+        arg(
+            long = "poll-pending",
+            long_help = "Enable polling pending block",
+            action = clap::ArgAction::Set,
+            default_value = "false",
+            env = "PATHFINDER_POLL_PENDING",
+        )
     )]
+    #[cfg(not(feature = "p2p"))]
     poll_pending: bool,
 
     #[arg(
@@ -141,6 +146,20 @@ Examples:
         env = "PATHFINDER_HEAD_POLL_INTERVAL_SECONDS"
     )]
     poll_interval: std::num::NonZeroU64,
+
+    /// poll_pending and p2p_boot are mutually exclusive
+    #[cfg_attr(
+        feature = "p2p",
+        arg(
+            short = 'b',
+            long = "p2p.bootstrap",
+            long_help = "Configure as P2P bootstrap node",
+            default_value = "false",
+            hide = true
+        )
+    )]
+    #[cfg(feature = "p2p")]
+    p2p_boot: bool,
 }
 
 #[derive(clap::Args)]
@@ -288,6 +307,7 @@ pub struct Config {
     pub sqlite_wal: JournalMode,
     pub max_rpc_connections: std::num::NonZeroU32,
     pub poll_interval: std::time::Duration,
+    pub p2p_boot: bool,
 }
 
 pub struct WebSocket {
@@ -373,6 +393,9 @@ impl Config {
             }),
             monitor_address: cli.monitor_address,
             network,
+            #[cfg(feature = "p2p")]
+            poll_pending: false,
+            #[cfg(not(feature = "p2p"))]
             poll_pending: cli.poll_pending,
             python_subprocesses: cli.python_subprocesses,
             sqlite_wal: match cli.sqlite_wal {
@@ -381,6 +404,10 @@ impl Config {
             },
             max_rpc_connections: cli.max_rpc_connections,
             poll_interval: std::time::Duration::from_secs(cli.poll_interval.get()),
+            #[cfg(feature = "p2p")]
+            p2p_boot: cli.p2p_boot,
+            #[cfg(not(feature = "p2p"))]
+            p2p_boot: false,
         }
     }
 }
