@@ -10,8 +10,7 @@ use stark_hash::Felt;
 use tokio::sync::RwLock;
 use tracing::Instrument;
 
-#[cfg(any(feature = "test-utils", test))]
-mod client;
+pub mod client;
 mod sync_handlers;
 
 #[tracing::instrument(name = "p2p", skip_all)]
@@ -21,7 +20,12 @@ pub async fn start(
     sync_state: Arc<SyncState>,
     listen_on: Multiaddr,
     bootstrap_addresses: &[Multiaddr],
-) -> anyhow::Result<(Arc<RwLock<Peers>>, p2p::Client, tokio::task::JoinHandle<()>)> {
+) -> anyhow::Result<(
+    Arc<RwLock<Peers>>,
+    p2p::Client,
+    (),
+    tokio::task::JoinHandle<()>,
+)> {
     let keypair = Keypair::generate_ed25519();
 
     let peer_id = keypair.public().to_peer_id();
@@ -90,7 +94,7 @@ pub async fn start(
         )
     };
 
-    Ok((peers.clone(), p2p_client, join_handle))
+    Ok((peers.clone(), p2p_client, (), join_handle))
 }
 
 async fn handle_p2p_event(
