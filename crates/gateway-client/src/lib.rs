@@ -1,8 +1,8 @@
 //! Starknet L2 sequencer client.
 use pathfinder_common::{
-    BlockHash, BlockId, BlockNumber, CallParam, CasmHash, Chain, ClassHash, ContractAddress,
-    ContractAddressSalt, Fee, TransactionHash, TransactionNonce, TransactionSignatureElem,
-    TransactionVersion,
+    BlockHash, BlockHeader, BlockId, BlockNumber, CallParam, CasmHash, Chain, ClassHash,
+    ContractAddress, ContractAddressSalt, Fee, TransactionHash, TransactionNonce,
+    TransactionSignatureElem, TransactionVersion,
 };
 use reqwest::Url;
 use starknet_gateway_types::{
@@ -110,7 +110,12 @@ pub trait GatewayApi: Sync {
     /// This is a **temporary** measure to keep the sync logic unchanged
     ///
     /// TODO remove me when sync is changed to use the high level (ie. peer unaware) p2p API
-    async fn propagate_block_header(&self, _block: &Block) {
+    async fn propagate_block_header(
+        &self,
+        header: &BlockHeader,
+        transaction_count: usize,
+        event_count: usize,
+    ) {
         // Intentionally does nothing for default impl
     }
 
