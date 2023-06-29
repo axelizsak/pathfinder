@@ -110,7 +110,7 @@ fn block_headers(
             block_number.into(),
             block_number.into(),
             None,
-            &V03KeyFilter(vec![]),
+            &V03KeyFilter::new(vec![]),
         )?;
 
         headers.push(conv::header::from(
