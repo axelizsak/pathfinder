@@ -2,6 +2,7 @@ mod block_context;
 mod call;
 mod error;
 mod estimate;
+mod pending;
 mod simulate;
 mod state_reader;
 mod transaction;

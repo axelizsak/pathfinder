@@ -2,13 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use pathfinder_common::state_update::ContractUpdate;
 use pathfinder_common::{
     BlockNumber, BlockTimestamp, CallParam, CallResultValue, ChainId, ContractAddress, EntryPoint,
     SequencerAddress, StateUpdate,
 };
 use stark_hash::Felt;
-use starknet_in_rust::core::errors::state_errors::StateError;
 use starknet_in_rust::execution::execution_entry_point::ExecutionEntryPoint;
 use starknet_in_rust::execution::TransactionExecutionContext;
 
@@ -44,7 +42,9 @@ pub fn call(
         Some(casm_class_cache),
     );
 
-    pending_update.map(|pending_update| apply_pending_update(&mut state, pending_update.as_ref()));
+    pending_update.map(|pending_update| {
+        super::pending::apply_pending_update(&mut state, pending_update.as_ref())
+    });
 
     let contract_address = Address(Felt252::from_bytes_be(contract_address.get().as_be_bytes()));
     let calldata = calldata
@@ -99,60 +99,4 @@ pub fn call(
         .context("Converting results to felts")?;
 
     Ok(result)
-}
-
-fn apply_pending_update<S: starknet_in_rust::state::state_api::State>(
-    state: &mut S,
-    pending_update: &StateUpdate,
-) -> Result<(), StateError> {
-    // NOTE: class _declarations_ are handled during sync. We download and insert new class declarations for the pending block
-    // after downloading it -- here we build on the fact that those are already available in the database -- and thus in the state
-    // as well...
-
-    let mut address_to_class_hash: HashMap<Address, starknet_in_rust::utils::ClassHash> =
-        Default::default();
-    let mut address_to_nonce: HashMap<Address, Felt252> = Default::default();
-    let mut storage_updates: HashMap<Address, HashMap<Felt252, Felt252>> = Default::default();
-
-    for (
-        contract_address,
-        ContractUpdate {
-            storage,
-            class,
-            nonce,
-        },
-    ) in &pending_update.contract_updates
-    {
-        let contract_address = Address(contract_address.get().into());
-
-        let diff: HashMap<Felt252, Felt252> = storage
-            .iter()
-            .map(|(address, value)| (address.get().into(), value.0.into()))
-            .collect();
-
-        if !diff.is_empty() {
-            storage_updates.insert(contract_address.clone(), diff);
-        }
-
-        if let Some(class) = class {
-            use pathfinder_common::state_update::ContractClassUpdate::*;
-            match class {
-                Deploy(class_hash) | Replace(class_hash) => {
-                    address_to_class_hash
-                        .insert(contract_address.clone(), class_hash.0.to_be_bytes());
-                }
-            };
-        }
-
-        if let Some(nonce) = nonce {
-            address_to_nonce.insert(contract_address, nonce.0.into());
-        }
-    }
-
-    state.apply_state_update(&starknet_in_rust::state::StateDiff::new(
-        address_to_class_hash,
-        address_to_nonce,
-        Default::default(),
-        storage_updates,
-    ))
 }
