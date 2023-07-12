@@ -61,7 +61,7 @@ pub fn call(
         EntryPointType::External,
         None,
         None,
-        0,
+        starknet_in_rust::definitions::constants::INITIAL_GAS_COST,
     );
 
     let block_context = super::block_context::construct_block_context(

@@ -109,7 +109,7 @@ pub(super) fn map_broadcasted_transaction(
                     chain_id.0.into(),
                     Some(tx.nonce.0.into()),
                 )?;
-                Ok(Transaction::InvokeFunction(tx.into()))
+                Ok(Transaction::InvokeFunction(tx))
             }
         },
         BroadcastedTransaction::DeployAccount(tx) => {
@@ -129,7 +129,7 @@ pub(super) fn map_broadcasted_transaction(
                 tx.contract_address_salt.0.into(),
                 chain_id.0.into(),
             )?;
-            Ok(Transaction::DeployAccount(tx.into()))
+            Ok(Transaction::DeployAccount(tx))
         }
     }
 }
@@ -199,10 +199,11 @@ pub(super) fn map_gateway_transaction(
                     .class_definition(tx.class_hash)?
                     .context("Fetching class definition")?;
 
-                let contract_class = serde_json::from_slice::<FeederGatewayContractClass>(
-                    &contract_class,
-                )
-                .map_err(|e| anyhow::anyhow!("Failed to parse gateway class definition: {}", e))?;
+                let contract_class =
+                    serde_json::from_slice::<FeederGatewayContractClass<'_>>(&contract_class)
+                        .map_err(|e| {
+                            anyhow::anyhow!("Failed to parse gateway class definition: {}", e)
+                        })?;
 
                 let compiler_contract_class_json = serde_json::json!({
                     "abi": [],
@@ -255,7 +256,7 @@ pub(super) fn map_gateway_transaction(
                 tx.transaction_hash.0.into(),
             )?;
 
-            Ok(Transaction::Deploy(tx.into()))
+            Ok(Transaction::Deploy(tx))
         }
         starknet_gateway_types::reply::transaction::Transaction::DeployAccount(tx) => {
             let constructor_calldata = tx
@@ -274,7 +275,7 @@ pub(super) fn map_gateway_transaction(
                 tx.contract_address_salt.0.into(),
                 tx.transaction_hash.0.into(),
             )?;
-            Ok(Transaction::DeployAccount(tx.into()))
+            Ok(Transaction::DeployAccount(tx))
         }
         starknet_gateway_types::reply::transaction::Transaction::Invoke(tx) => match tx {
             starknet_gateway_types::reply::transaction::InvokeTransaction::V0(tx) => {
@@ -291,7 +292,7 @@ pub(super) fn map_gateway_transaction(
                     None,
                     tx.transaction_hash.0.into(),
                 )?;
-                Ok(Transaction::InvokeFunction(tx.into()))
+                Ok(Transaction::InvokeFunction(tx))
             }
             starknet_gateway_types::reply::transaction::InvokeTransaction::V1(tx) => {
                 let calldata = tx.calldata.into_iter().map(|p| p.0.into()).collect();
@@ -307,7 +308,7 @@ pub(super) fn map_gateway_transaction(
                     Some(tx.nonce.0.into()),
                     tx.transaction_hash.0.into(),
                 )?;
-                Ok(Transaction::InvokeFunction(tx.into()))
+                Ok(Transaction::InvokeFunction(tx))
             }
         },
         starknet_gateway_types::reply::transaction::Transaction::L1Handler(tx) => {

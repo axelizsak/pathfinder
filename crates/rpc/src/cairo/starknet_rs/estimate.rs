@@ -96,7 +96,6 @@ pub fn estimate_message_fee(
     let sender_address =
         Felt::from_be_slice(sender_address.0.as_bytes()).expect("Ethereum address is 160 bits");
     let calldata = std::iter::once(pathfinder_common::CallParam(sender_address))
-        .into_iter()
         .chain(message.calldata.into_iter())
         .map(|p| p.0.into())
         .collect();

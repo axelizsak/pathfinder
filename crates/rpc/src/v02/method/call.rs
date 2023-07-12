@@ -79,7 +79,6 @@ pub async fn call(context: RpcContext, input: CallInput) -> Result<CallOutput, C
     let storage = context.storage.clone();
     let span = tracing::Span::current();
 
-    // FIXME: handle pending data
     let result = tokio::task::spawn_blocking(move || {
         let _g = span.enter();
 
@@ -216,7 +215,7 @@ mod tests {
         use super::*;
 
         use pathfinder_common::{
-            felt, BlockHash, BlockHeader, BlockNumber, BlockTimestamp, Chain, ChainId,
+            felt, BlockHash, BlockHeader, BlockNumber, BlockTimestamp, Chain, ChainId, ClassHash,
             ContractAddress, GasPrice, StateUpdate, StorageAddress, StorageValue,
         };
         use pathfinder_storage::Storage;
@@ -297,7 +296,7 @@ mod tests {
 
             let input = CallInput {
                 request: FunctionCall {
-                    contract_address: contract_address,
+                    contract_address,
                     entry_point_selector: EntryPoint::hashed(b"get_value"),
                     calldata: vec![CallParam(*test_key.get())],
                 },
@@ -323,7 +322,7 @@ mod tests {
             // unchanged on latest block
             let input = CallInput {
                 request: FunctionCall {
-                    contract_address: contract_address,
+                    contract_address,
                     entry_point_selector: EntryPoint::hashed(b"get_value"),
                     calldata: vec![CallParam(*test_key.get())],
                 },
@@ -335,7 +334,7 @@ mod tests {
             // updated on pending
             let input = CallInput {
                 request: FunctionCall {
-                    contract_address: contract_address,
+                    contract_address,
                     entry_point_selector: EntryPoint::hashed(b"get_value"),
                     calldata: vec![CallParam(*test_key.get())],
                 },
@@ -397,6 +396,61 @@ mod tests {
                 .await;
 
             pending_data
+        }
+
+        #[tokio::test]
+        async fn call_sierra_class() {
+            let (context, last_block_header, _contract_address, _test_key, _test_value) =
+                test_context().await;
+
+            let sierra_definition =
+                include_bytes!("../../../fixtures/contracts/storage_access.json");
+            let sierra_hash =
+                sierra_hash!("0x03f6241e01a5afcb81f181518d74a1d3c8fc49c2aa583f805b67732e494ba9a8");
+            let casm_definition = include_bytes!("../../../fixtures/contracts/storage_access.casm");
+            let casm_hash =
+                casm_hash!("0x069032ff71f77284e1a0864a573007108ca5cc08089416af50f03260f5d6d4d8");
+
+            let block_number = BlockNumber::new_or_panic(last_block_header.number.get() + 1);
+            let contract_address = contract_address!("0xcaaaa");
+            let storage_key = StorageAddress::hashed(b"my_storage_var");
+            let storage_value = storage_value!("0xb");
+
+            let mut connection = context.storage.connection().unwrap();
+            let tx = connection.transaction().unwrap();
+
+            tx.insert_sierra_class(
+                &sierra_hash,
+                sierra_definition,
+                &casm_hash,
+                casm_definition,
+                "2.0.0",
+            )
+            .unwrap();
+
+            let header = BlockHeader::builder()
+                .with_number(block_number)
+                .finalize_with_hash(block_hash!("0xb02"));
+            tx.insert_block_header(&header).unwrap();
+
+            let state_update = StateUpdate::default()
+                .with_declared_sierra_class(sierra_hash, casm_hash)
+                .with_deployed_contract(contract_address, ClassHash(*sierra_hash.get()))
+                .with_storage_update(contract_address, storage_key, storage_value);
+            tx.insert_state_update(block_number, &state_update).unwrap();
+
+            tx.commit().unwrap();
+
+            let input = CallInput {
+                request: FunctionCall {
+                    contract_address,
+                    entry_point_selector: EntryPoint::hashed(b"get_data"),
+                    calldata: vec![],
+                },
+                block_id: BlockId::Latest,
+            };
+            let result = call(context, input).await.unwrap();
+            assert_eq!(result, CallOutput(vec![CallResultValue(storage_value.0)]));
         }
     }
 
