@@ -223,8 +223,15 @@ mod tests {
         use starknet_gateway_test_fixtures::class_definitions::{
             CONTRACT_DEFINITION, CONTRACT_DEFINITION_CLASS_HASH,
         };
+        use starknet_gateway_types::reply::PendingBlock;
 
-        async fn test_context() -> (RpcContext, ContractAddress, StorageAddress, StorageValue) {
+        async fn test_context() -> (
+            RpcContext,
+            BlockHeader,
+            ContractAddress,
+            StorageAddress,
+            StorageValue,
+        ) {
             let storage = Storage::in_memory().unwrap();
             let mut db = storage.connection().unwrap();
             let tx = db.transaction().unwrap();
@@ -276,6 +283,7 @@ mod tests {
 
             (
                 context,
+                header,
                 test_contract_address,
                 test_contract_key,
                 test_contract_value,
@@ -284,7 +292,8 @@ mod tests {
 
         #[tokio::test]
         async fn storage_access() {
-            let (context, contract_address, test_key, test_value) = test_context().await;
+            let (context, _last_block_header, contract_address, test_key, test_value) =
+                test_context().await;
 
             let input = CallInput {
                 request: FunctionCall {
@@ -292,10 +301,102 @@ mod tests {
                     entry_point_selector: EntryPoint::hashed(b"get_value"),
                     calldata: vec![CallParam(*test_key.get())],
                 },
-                block_id: BlockId::Number(BlockNumber::new_or_panic(1)),
+                block_id: BlockId::Latest,
             };
             let result = call(context, input).await.unwrap();
             assert_eq!(result, CallOutput(vec![CallResultValue(test_value.0)]));
+        }
+
+        #[tokio::test]
+        async fn storage_updated_in_pending() {
+            let (context, last_block_header, contract_address, test_key, test_value) =
+                test_context().await;
+
+            let new_value = StorageValue(felt!("0x09"));
+            let pending_data = pending_data_with_update(
+                last_block_header,
+                StateUpdate::default().with_storage_update(contract_address, test_key, new_value),
+            )
+            .await;
+            let context = context.with_pending_data(pending_data);
+
+            // unchanged on latest block
+            let input = CallInput {
+                request: FunctionCall {
+                    contract_address: contract_address,
+                    entry_point_selector: EntryPoint::hashed(b"get_value"),
+                    calldata: vec![CallParam(*test_key.get())],
+                },
+                block_id: BlockId::Latest,
+            };
+            let result = call(context.clone(), input).await.unwrap();
+            assert_eq!(result, CallOutput(vec![CallResultValue(test_value.0)]));
+
+            // updated on pending
+            let input = CallInput {
+                request: FunctionCall {
+                    contract_address: contract_address,
+                    entry_point_selector: EntryPoint::hashed(b"get_value"),
+                    calldata: vec![CallParam(*test_key.get())],
+                },
+                block_id: BlockId::Pending,
+            };
+            let result = call(context, input).await.unwrap();
+            assert_eq!(result, CallOutput(vec![CallResultValue(new_value.0)]));
+        }
+
+        #[tokio::test]
+        async fn contract_deployed_in_pending() {
+            let (context, last_block_header, _contract_address, test_key, _test_value) =
+                test_context().await;
+
+            let new_value = storage_value!("0x09");
+            let new_contract_address = contract_address!("0xdeadbeef");
+            let pending_data = pending_data_with_update(
+                last_block_header,
+                StateUpdate::default()
+                    .with_deployed_contract(new_contract_address, CONTRACT_DEFINITION_CLASS_HASH)
+                    .with_storage_update(new_contract_address, test_key, new_value),
+            )
+            .await;
+            let context = context.with_pending_data(pending_data);
+
+            let input = CallInput {
+                request: FunctionCall {
+                    contract_address: new_contract_address,
+                    entry_point_selector: EntryPoint::hashed(b"get_value"),
+                    calldata: vec![CallParam(*test_key.get())],
+                },
+                block_id: BlockId::Pending,
+            };
+            let result = call(context.clone(), input).await.unwrap();
+            assert_eq!(result, CallOutput(vec![CallResultValue(new_value.0)]));
+        }
+
+        async fn pending_data_with_update(
+            last_block_header: BlockHeader,
+            state_update: StateUpdate,
+        ) -> PendingData {
+            let pending_data = PendingData::default();
+            pending_data
+                .set(
+                    Arc::new(PendingBlock {
+                        gas_price: last_block_header.gas_price,
+                        parent_hash: last_block_header.hash,
+                        sequencer_address: last_block_header.sequencer_address,
+                        status: starknet_gateway_types::reply::Status::Pending,
+                        timestamp: BlockTimestamp::new_or_panic(
+                            last_block_header.timestamp.get() + 1,
+                        ),
+                        transaction_receipts: vec![],
+                        transactions: vec![],
+                        starknet_version: last_block_header.starknet_version,
+                    }),
+                    Arc::new(state_update),
+                )
+                .await;
+
+            pending_data
         }
     }
 
