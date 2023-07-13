@@ -247,8 +247,7 @@ mod tests {
                 .finalize_with_hash(BlockHash(felt!("0xb00")));
             tx.insert_block_header(&header).unwrap();
 
-            // Declare & deploy two classes: a dummy account (does no signature verification)
-            // and a test class providing an entry point reading from storage
+            // Declare & deploy a test class providing an entry point reading from storage
             let block1_number = BlockNumber::GENESIS + 1;
             let block1_hash = BlockHash(felt!("0xb01"));
 

@@ -67,8 +67,14 @@ pub(super) fn map_broadcasted_transaction(
             crate::v02::types::request::BroadcastedDeclareTransaction::V2(tx) => {
                 let signature = tx.signature.into_iter().map(|s| s.0.into()).collect();
 
+                let abi: serde_json::Value =
+                    serde_json::from_str(&tx.contract_class.abi).map_err(|error| {
+                        tracing::error!(%error, "Failed to parse Sierra class ABI");
+                        TransactionError::MissingCompiledClass
+                    })?;
+
                 let json = serde_json::json!({
-                    "abi": [],
+                    "abi": abi,
                     "sierra_program": tx.contract_class.sierra_program,
                     "contract_class_version": tx.contract_class.contract_class_version,
                     "entry_points_by_type": tx.contract_class.entry_points_by_type,
@@ -205,8 +211,14 @@ pub(super) fn map_gateway_transaction(
                             anyhow::anyhow!("Failed to parse gateway class definition: {}", e)
                         })?;
 
+                let abi: serde_json::Value = serde_json::from_str(contract_class.abi.as_ref())
+                    .map_err(|error| {
+                        tracing::error!(%error, "Failed to parse Sierra class ABI");
+                        TransactionError::MissingCompiledClass
+                    })?;
+
                 let compiler_contract_class_json = serde_json::json!({
-                    "abi": [],
+                    "abi": abi,
                     "sierra_program": contract_class.sierra_program,
                     "contract_class_version": contract_class.contract_class_version,
                     "entry_points_by_type": contract_class.entry_points_by_type,
