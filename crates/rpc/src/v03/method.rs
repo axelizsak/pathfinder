@@ -17,11 +17,74 @@ pub(crate) mod common {
     use starknet_gateway_types::pending::PendingData;
 
     use crate::{
-        cairo::ext_py::{BlockHashNumberOrLatest, GasPriceSource},
+        cairo::{
+            ext_py::{BlockHashNumberOrLatest, GasPriceSource},
+            starknet_rs::ExecutionState,
+        },
         context::RpcContext,
     };
 
-    pub async fn prepare_block(
+    use anyhow::Context;
+
+    pub enum ExecutionStateError {
+        BlockNotFound,
+        Internal(anyhow::Error),
+    }
+
+    impl From<anyhow::Error> for ExecutionStateError {
+        fn from(error: anyhow::Error) -> Self {
+            Self::Internal(error)
+        }
+    }
+
+    pub async fn execution_state(
+        context: RpcContext,
+        block_id: BlockId,
+    ) -> Result<ExecutionState, ExecutionStateError> {
+        let (gas_price, at_block, pending_timestamp, pending_update) =
+            crate::v03::method::common::prepare_block(&context, block_id).await?;
+
+        let storage = context.storage.clone();
+        let span = tracing::Span::current();
+
+        let block = tokio::task::spawn_blocking(move || {
+            let _g = span.enter();
+
+            let mut db = storage.connection()?;
+            let tx = db.transaction().context("Creating database transaction")?;
+
+            let block = tx
+                .block_header(at_block.into())
+                .context("Reading block")?
+                .ok_or_else(|| ExecutionStateError::BlockNotFound)?;
+
+            Ok::<_, ExecutionStateError>(block)
+        })
+        .await
+        .context("Getting block")??;
+
+        let gas_price = match gas_price {
+            crate::cairo::ext_py::GasPriceSource::PastBlock => block.gas_price.0.into(),
+            crate::cairo::ext_py::GasPriceSource::Current(c) => c,
+        };
+
+        let timestamp = pending_timestamp.unwrap_or(block.timestamp);
+
+        let execution_state = ExecutionState {
+            storage: context.storage,
+            chain_id: context.chain_id,
+            block_number: block.number,
+            block_timestamp: timestamp,
+            sequencer_address: block.sequencer_address,
+            state_at_block: Some(block.number),
+            gas_price,
+            pending_update,
+        };
+
+        Ok(execution_state)
+    }
+
+    async fn prepare_block(
         context: &RpcContext,
         block_id: BlockId,
     ) -> anyhow::Result<(
@@ -59,7 +122,7 @@ pub(crate) mod common {
 
     /// Transforms the request to call or estimate fee at some point in time to the type expected
     /// by [`crate::cairo::ext_py`] with the optional, latest pending data.
-    pub async fn base_block_and_pending_for_call(
+    async fn base_block_and_pending_for_call(
         at_block: BlockId,
         pending_data: &Option<PendingData>,
     ) -> Result<

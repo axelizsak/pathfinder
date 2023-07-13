@@ -21,7 +21,6 @@ use super::{block_context::construct_block_context, error::CallError, ExecutionS
 
 pub fn estimate_fee(
     execution_state: ExecutionState,
-    gas_price: U256,
     transactions: Vec<BroadcastedTransaction>,
 ) -> Result<Vec<FeeEstimate>, CallError> {
     let transactions = transactions
@@ -29,12 +28,11 @@ pub fn estimate_fee(
         .map(|tx| map_broadcasted_transaction(tx, execution_state.chain_id))
         .collect::<Result<Vec<_>, TransactionError>>()?;
 
-    estimate_fee_impl(execution_state, gas_price, transactions)
+    estimate_fee_impl(execution_state, transactions)
 }
 
 pub fn estimate_fee_for_gateway_transactions(
     execution_state: ExecutionState,
-    gas_price: U256,
     transactions: Vec<starknet_gateway_types::reply::transaction::Transaction>,
 ) -> anyhow::Result<Vec<FeeEstimate>> {
     let mut db = execution_state.storage.connection()?;
@@ -47,7 +45,7 @@ pub fn estimate_fee_for_gateway_transactions(
 
     drop(db_tx);
 
-    let result = estimate_fee_impl(execution_state, gas_price, transactions)
+    let result = estimate_fee_impl(execution_state, transactions)
         .map_err(|e| anyhow::anyhow!("Estimate fee failed: {:?}", e))?;
 
     Ok(result)
@@ -55,7 +53,6 @@ pub fn estimate_fee_for_gateway_transactions(
 
 pub fn estimate_message_fee(
     execution_state: ExecutionState,
-    gas_price: U256,
     message: FunctionCall,
     sender_address: EthereumAddress,
 ) -> Result<FeeEstimate, CallError> {
@@ -77,7 +74,7 @@ pub fn estimate_message_fee(
     )?;
     let transaction = Transaction::L1Handler(transaction);
 
-    let mut result = estimate_fee_impl(execution_state, gas_price, vec![transaction])?;
+    let mut result = estimate_fee_impl(execution_state, vec![transaction])?;
 
     if result.len() != 1 {
         return Err(
@@ -92,10 +89,9 @@ pub fn estimate_message_fee(
 
 fn estimate_fee_impl(
     execution_state: ExecutionState,
-    gas_price: U256,
     transactions: Vec<Transaction>,
 ) -> Result<Vec<FeeEstimate>, CallError> {
-    let block_context = construct_block_context(&execution_state, gas_price)?;
+    let block_context = construct_block_context(&execution_state)?;
 
     let state_reader = PathfinderStateReader {
         storage: execution_state.storage,
@@ -128,15 +124,16 @@ fn estimate_fee_impl(
                 let actual_fee = match transaction {
                     Transaction::L1Handler(_) => calculate_tx_fee(
                         &tx_info.actual_resources,
-                        gas_price.as_u128(),
+                        execution_state.gas_price.as_u128(),
                         &block_context,
                     )?,
                     _ => tx_info.actual_fee,
                 };
 
                 fees.push(FeeEstimate {
-                    gas_consumed: U256::from(actual_fee) / std::cmp::max(1.into(), gas_price),
-                    gas_price,
+                    gas_consumed: U256::from(actual_fee)
+                        / std::cmp::max(1.into(), execution_state.gas_price),
+                    gas_price: execution_state.gas_price,
                     overall_fee: actual_fee.into(),
                 });
             }

@@ -20,11 +20,10 @@ use super::{block_context::construct_block_context, error::CallError, ExecutionS
 
 pub fn simulate(
     execution_state: ExecutionState,
-    gas_price: U256,
     transactions: Vec<BroadcastedTransaction>,
     skip_validate: bool,
 ) -> Result<Vec<TransactionSimulation>, CallError> {
-    let block_context = construct_block_context(&execution_state, gas_price)?;
+    let block_context = construct_block_context(&execution_state)?;
 
     let transactions = transactions
         .into_iter()
@@ -61,8 +60,8 @@ pub fn simulate(
                 simulations.push(TransactionSimulation {
                     fee_estimation: FeeEstimate {
                         gas_consumed: U256::from(tx_info.actual_fee)
-                            / std::cmp::max(1.into(), gas_price),
-                        gas_price,
+                            / std::cmp::max(1.into(), execution_state.gas_price),
+                        gas_price: execution_state.gas_price,
                         overall_fee: tx_info.actual_fee.into(),
                     },
                     trace: to_trace(transaction, tx_info)?,

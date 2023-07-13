@@ -99,6 +99,7 @@ pub async fn call(context: RpcContext, input: CallInput) -> Result<CallOutput, C
             block_timestamp: timestamp,
             sequencer_address: block.sequencer_address,
             state_at_block: Some(block.number),
+            gas_price: 1.into(),
             pending_update,
         };
 

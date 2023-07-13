@@ -19,7 +19,7 @@ pub fn call(
     entry_point_selector: EntryPoint,
     calldata: Vec<CallParam>,
 ) -> Result<Vec<CallResultValue>, CallError> {
-    let block_context = super::block_context::construct_block_context(&execution_state, 1.into())?;
+    let block_context = super::block_context::construct_block_context(&execution_state)?;
 
     let state_reader = PathfinderStateReader {
         storage: execution_state.storage,

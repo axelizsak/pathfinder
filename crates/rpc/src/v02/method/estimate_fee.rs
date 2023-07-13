@@ -1,7 +1,7 @@
-use crate::cairo::starknet_rs::ExecutionState;
+use anyhow::Context;
+
 use crate::context::RpcContext;
 use crate::v02::types::{reply::FeeEstimate, request::BroadcastedTransaction};
-use anyhow::Context;
 use pathfinder_common::BlockId;
 
 #[derive(serde::Deserialize, Debug, PartialEq, Eq)]
@@ -29,59 +29,28 @@ impl From<crate::cairo::starknet_rs::CallError> for EstimateFeeError {
     }
 }
 
+impl From<crate::v03::method::common::ExecutionStateError> for EstimateFeeError {
+    fn from(error: crate::v03::method::common::ExecutionStateError) -> Self {
+        match error {
+            crate::v03::method::common::ExecutionStateError::BlockNotFound => Self::BlockNotFound,
+            crate::v03::method::common::ExecutionStateError::Internal(e) => Self::Internal(e),
+        }
+    }
+}
+
 pub async fn estimate_fee(
     context: RpcContext,
     input: EstimateFeeInput,
 ) -> Result<FeeEstimate, EstimateFeeError> {
-    let (gas_price, at_block, pending_timestamp, pending_update) =
-        crate::v03::method::common::prepare_block(&context, input.block_id).await?;
-
-    let storage = context.storage.clone();
-    let span = tracing::Span::current();
-
-    let block = tokio::task::spawn_blocking(move || {
-        let _g = span.enter();
-
-        let mut db = storage.connection()?;
-        let tx = db.transaction().context("Creating database transaction")?;
-
-        let block = tx
-            .block_header(at_block.into())
-            .context("Reading block")?
-            .ok_or_else(|| EstimateFeeError::BlockNotFound)?;
-
-        Ok::<_, EstimateFeeError>(block)
-    })
-    .await
-    .context("Getting block")??;
-
-    let gas_price = match gas_price {
-        crate::cairo::ext_py::GasPriceSource::PastBlock => block.gas_price.0.into(),
-        crate::cairo::ext_py::GasPriceSource::Current(c) => c,
-    };
-
-    let timestamp = pending_timestamp.unwrap_or(block.timestamp);
-
-    let execution_state = ExecutionState {
-        storage: context.storage,
-        chain_id: context.chain_id,
-        block_number: block.number,
-        block_timestamp: timestamp,
-        sequencer_address: block.sequencer_address,
-        state_at_block: Some(block.number),
-        pending_update,
-    };
+    let execution_state =
+        crate::v03::method::common::execution_state(context, input.block_id).await?;
 
     let span = tracing::Span::current();
 
     let mut result = tokio::task::spawn_blocking(move || {
         let _g = span.enter();
 
-        let result = crate::cairo::starknet_rs::estimate_fee(
-            execution_state,
-            gas_price,
-            vec![input.request],
-        )?;
+        let result = crate::cairo::starknet_rs::estimate_fee(execution_state, vec![input.request])?;
 
         Ok::<_, EstimateFeeError>(result)
     })

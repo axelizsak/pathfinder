@@ -147,17 +147,17 @@ fn execute(storage: Storage, chain_id: ChainId, rx: crossbeam_channel::Receiver<
 
         let execution_state = ExecutionState {
             storage: storage.clone(),
-            chain_id: chain_id,
+            chain_id,
             block_number: work.block_number,
             block_timestamp: work.block_timestamp,
             sequencer_address: work.sequencer_address,
             state_at_block: work.state_at_block,
+            gas_price: work.gas_price,
             pending_update: None,
         };
 
         match pathfinder_rpc::cairo::starknet_rs::estimate_fee_for_gateway_transactions(
             execution_state,
-            work.gas_price,
             work.transactions,
         ) {
             Ok(_) => {}

@@ -1,7 +1,6 @@
 use anyhow::Context;
 
 use crate::{
-    cairo::starknet_rs::ExecutionState,
     context::RpcContext,
     v02::{method::call::FunctionCall, types::reply::FeeEstimate},
 };
@@ -31,48 +30,20 @@ impl From<crate::cairo::starknet_rs::CallError> for EstimateMessageFeeError {
     }
 }
 
+impl From<super::common::ExecutionStateError> for EstimateMessageFeeError {
+    fn from(error: super::common::ExecutionStateError) -> Self {
+        match error {
+            super::common::ExecutionStateError::BlockNotFound => Self::BlockNotFound,
+            super::common::ExecutionStateError::Internal(e) => Self::Internal(e),
+        }
+    }
+}
+
 pub async fn estimate_message_fee(
     context: RpcContext,
     input: EstimateMessageFeeInput,
 ) -> Result<FeeEstimate, EstimateMessageFeeError> {
-    let (gas_price, at_block, pending_timestamp, pending_update) =
-        crate::v03::method::common::prepare_block(&context, input.block_id).await?;
-
-    let storage = context.storage.clone();
-    let span = tracing::Span::current();
-
-    let block = tokio::task::spawn_blocking(move || {
-        let _g = span.enter();
-
-        let mut db = storage.connection()?;
-        let tx = db.transaction().context("Creating database transaction")?;
-
-        let block = tx
-            .block_header(at_block.into())
-            .context("Reading block")?
-            .ok_or_else(|| EstimateMessageFeeError::BlockNotFound)?;
-
-        Ok::<_, EstimateMessageFeeError>(block)
-    })
-    .await
-    .context("Getting block")??;
-
-    let gas_price = match gas_price {
-        crate::cairo::ext_py::GasPriceSource::PastBlock => block.gas_price.0.into(),
-        crate::cairo::ext_py::GasPriceSource::Current(c) => c,
-    };
-
-    let timestamp = pending_timestamp.unwrap_or(block.timestamp);
-
-    let execution_state = ExecutionState {
-        storage: context.storage,
-        chain_id: context.chain_id,
-        block_number: block.number,
-        block_timestamp: timestamp,
-        sequencer_address: block.sequencer_address,
-        state_at_block: Some(block.number),
-        pending_update,
-    };
+    let execution_state = super::common::execution_state(context, input.block_id).await?;
 
     let span = tracing::Span::current();
 
@@ -81,7 +52,6 @@ pub async fn estimate_message_fee(
 
         let result = crate::cairo::starknet_rs::estimate_message_fee(
             execution_state,
-            gas_price,
             input.message,
             input.sender_address,
         )?;
