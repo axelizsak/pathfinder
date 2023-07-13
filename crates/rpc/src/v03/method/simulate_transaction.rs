@@ -2,7 +2,7 @@ use crate::{
     cairo::ext_py::types::{
         FeeEstimate, FunctionInvocation, TransactionSimulation, TransactionTrace,
     },
-    cairo::starknet_rs::CallError,
+    cairo::starknet_rs::{CallError, ExecutionState},
     context::RpcContext,
     v02::{
         method::call::FunctionCall,
@@ -49,7 +49,7 @@ pub async fn simulate_transaction(
     context: RpcContext,
     input: SimulateTrasactionInput,
 ) -> Result<SimulateTransactionOutput, SimulateTransactionError> {
-    let (gas_price, at_block, _pending_timestamp, _pending_update) =
+    let (gas_price, at_block, pending_timestamp, pending_update) =
         prepare_block(&context, input.block_id).await?;
 
     let storage = context.storage.clone();
@@ -83,14 +83,25 @@ pub async fn simulate_transaction(
         .iter()
         .any(|flag| flag == &dto::SimulationFlag::SkipValidate);
 
+    let timestamp = pending_timestamp.unwrap_or(block.timestamp);
+
+    let execution_state = ExecutionState {
+        storage: context.storage,
+        chain_id: context.chain_id,
+        block_number: block.number,
+        block_timestamp: timestamp,
+        sequencer_address: block.sequencer_address,
+        state_at_block: Some(block.number),
+        pending_update,
+    };
+
+    let span = tracing::Span::current();
+
     let txs = tokio::task::spawn_blocking(move || {
+        let _g = span.enter();
+
         crate::cairo::starknet_rs::simulate(
-            context.storage,
-            context.chain_id,
-            block.number,
-            block.timestamp,
-            block.sequencer_address,
-            Some(block.number),
+            execution_state,
             gas_price,
             input.transactions,
             skip_validate,

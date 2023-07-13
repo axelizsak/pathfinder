@@ -321,9 +321,6 @@ pub enum GasPriceSource {
     /// manufacture a block hash for some future use cases.
     PastBlock,
     /// Use this latest value from `eth_gasPrice`.
-    ///
-    /// U256 is not used for serialization matters, [u8; 32] could be used as well. python side's
-    /// serialization limits this value to u128 but in general `eth_gasPrice` is U256.
     Current(primitive_types::U256),
 }
 

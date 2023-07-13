@@ -16,36 +16,25 @@ use crate::v03::method::simulate_transaction::dto::{EntryPointType, MsgToL1};
 
 use super::state_reader::PathfinderStateReader;
 use super::transaction::map_broadcasted_transaction;
-use super::{block_context::construct_block_context, error::CallError};
+use super::{block_context::construct_block_context, error::CallError, ExecutionState};
 
 pub fn simulate(
-    storage: pathfinder_storage::Storage,
-    chain_id: ChainId,
-    block_number: BlockNumber,
-    block_timestamp: BlockTimestamp,
-    sequencer_address: SequencerAddress,
-    state_at_block: Option<BlockNumber>,
+    execution_state: ExecutionState,
     gas_price: U256,
     transactions: Vec<BroadcastedTransaction>,
     skip_validate: bool,
 ) -> Result<Vec<TransactionSimulation>, CallError> {
     let transactions = transactions
         .into_iter()
-        .map(|tx| map_broadcasted_transaction(tx, chain_id))
+        .map(|tx| map_broadcasted_transaction(tx, execution_state.chain_id))
         .collect::<Result<Vec<_>, TransactionError>>()?;
 
     let state_reader = PathfinderStateReader {
-        storage,
-        block_number: state_at_block,
+        storage: execution_state.storage,
+        block_number: execution_state.state_at_block,
     };
 
-    let block_context = construct_block_context(
-        chain_id,
-        block_number,
-        block_timestamp,
-        sequencer_address,
-        gas_price,
-    )?;
+    let block_context = construct_block_context(&execution_state, gas_price)?;
 
     let contract_class_cache = HashMap::new();
     let casm_class_cache = HashMap::new();
@@ -57,7 +46,7 @@ pub fn simulate(
 
     let mut simulations = Vec::with_capacity(transactions.len());
     for (transaction_idx, transaction) in transactions.iter().enumerate() {
-        let span = tracing::debug_span!("execute", transaction_hash=%super::transaction::transaction_hash(transaction), %block_number);
+        let span = tracing::debug_span!("execute", transaction_hash=%super::transaction::transaction_hash(transaction), block_number=%execution_state.block_number);
         let _enter = span.enter();
 
         // tracing::trace!(?transaction, "Simulating transaction");

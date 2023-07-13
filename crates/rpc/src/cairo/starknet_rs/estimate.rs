@@ -1,6 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use pathfinder_common::{BlockNumber, BlockTimestamp, ChainId, EthereumAddress, SequencerAddress};
+use pathfinder_common::{
+    BlockNumber, BlockTimestamp, ChainId, EthereumAddress, SequencerAddress, StateUpdate,
+};
 use primitive_types::U256;
 
 use stark_hash::Felt;
@@ -17,77 +20,44 @@ use crate::cairo::ext_py::types::FeeEstimate;
 
 use super::state_reader::PathfinderStateReader;
 use super::transaction::{map_broadcasted_transaction, map_gateway_transaction};
-use super::{block_context::construct_block_context, error::CallError};
+use super::{block_context::construct_block_context, error::CallError, ExecutionState};
 
 pub fn estimate_fee(
-    storage: pathfinder_storage::Storage,
-    chain_id: ChainId,
-    block_number: BlockNumber,
-    block_timestamp: BlockTimestamp,
-    sequencer_address: SequencerAddress,
-    state_at_block: Option<BlockNumber>,
+    execution_state: ExecutionState,
     gas_price: U256,
     transactions: Vec<BroadcastedTransaction>,
 ) -> Result<Vec<FeeEstimate>, CallError> {
     let transactions = transactions
         .into_iter()
-        .map(|tx| map_broadcasted_transaction(tx, chain_id))
+        .map(|tx| map_broadcasted_transaction(tx, execution_state.chain_id))
         .collect::<Result<Vec<_>, TransactionError>>()?;
 
-    estimate_fee_impl(
-        storage,
-        chain_id,
-        block_number,
-        block_timestamp,
-        sequencer_address,
-        state_at_block,
-        gas_price,
-        transactions,
-    )
+    estimate_fee_impl(execution_state, gas_price, transactions)
 }
 
 pub fn estimate_fee_for_gateway_transactions(
-    storage: pathfinder_storage::Storage,
-    chain_id: ChainId,
-    block_number: BlockNumber,
-    block_timestamp: BlockTimestamp,
-    sequencer_address: SequencerAddress,
-    state_at_block: Option<BlockNumber>,
+    execution_state: ExecutionState,
     gas_price: U256,
     transactions: Vec<starknet_gateway_types::reply::transaction::Transaction>,
 ) -> anyhow::Result<Vec<FeeEstimate>> {
-    let mut db = storage.connection()?;
+    let mut db = execution_state.storage.connection()?;
     let db_tx = db.transaction()?;
 
     let transactions = transactions
         .into_iter()
-        .map(|tx| map_gateway_transaction(tx, chain_id, &db_tx))
+        .map(|tx| map_gateway_transaction(tx, execution_state.chain_id, &db_tx))
         .collect::<Result<Vec<_>, _>>()?;
 
     drop(db_tx);
 
-    let result = estimate_fee_impl(
-        storage,
-        chain_id,
-        block_number,
-        block_timestamp,
-        sequencer_address,
-        state_at_block,
-        gas_price,
-        transactions,
-    )
-    .map_err(|e| anyhow::anyhow!("Estimate fee failed: {:?}", e))?;
+    let result = estimate_fee_impl(execution_state, gas_price, transactions)
+        .map_err(|e| anyhow::anyhow!("Estimate fee failed: {:?}", e))?;
 
     Ok(result)
 }
 
 pub fn estimate_message_fee(
-    storage: pathfinder_storage::Storage,
-    chain_id: ChainId,
-    block_number: BlockNumber,
-    block_timestamp: BlockTimestamp,
-    sequencer_address: SequencerAddress,
-    state_at_block: Option<BlockNumber>,
+    execution_state: ExecutionState,
     gas_price: U256,
     message: FunctionCall,
     sender_address: EthereumAddress,
@@ -105,21 +75,12 @@ pub fn estimate_message_fee(
         message.entry_point_selector.0.into(),
         calldata,
         0.into(),
-        chain_id.0.into(),
+        execution_state.chain_id.0.into(),
         None,
     )?;
     let transaction = Transaction::L1Handler(transaction);
 
-    let mut result = estimate_fee_impl(
-        storage,
-        chain_id,
-        block_number,
-        block_timestamp,
-        sequencer_address,
-        state_at_block,
-        gas_price,
-        vec![transaction],
-    )?;
+    let mut result = estimate_fee_impl(execution_state, gas_price, vec![transaction])?;
 
     if result.len() != 1 {
         return Err(
@@ -133,27 +94,16 @@ pub fn estimate_message_fee(
 }
 
 fn estimate_fee_impl(
-    storage: pathfinder_storage::Storage,
-    chain_id: ChainId,
-    block_number: BlockNumber,
-    block_timestamp: BlockTimestamp,
-    sequencer_address: SequencerAddress,
-    state_at_block: Option<BlockNumber>,
+    execution_state: ExecutionState,
     gas_price: U256,
     transactions: Vec<Transaction>,
 ) -> Result<Vec<FeeEstimate>, CallError> {
     let state_reader = PathfinderStateReader {
-        storage,
-        block_number: state_at_block,
+        storage: execution_state.storage,
+        block_number: execution_state.state_at_block,
     };
 
-    let block_context = construct_block_context(
-        chain_id,
-        block_number,
-        block_timestamp,
-        sequencer_address,
-        gas_price,
-    )?;
+    let block_context = construct_block_context(&execution_state, gas_price)?;
 
     let contract_class_cache = HashMap::new();
     let casm_class_cache = HashMap::new();
@@ -165,7 +115,7 @@ fn estimate_fee_impl(
 
     let mut fees = Vec::with_capacity(transactions.len());
     for (transaction_idx, transaction) in transactions.iter().enumerate() {
-        let span = tracing::debug_span!("execute", transaction_hash=%super::transaction::transaction_hash(transaction), %block_number, %transaction_idx);
+        let span = tracing::debug_span!("execute", transaction_hash=%super::transaction::transaction_hash(transaction), block_number=%execution_state.block_number, %transaction_idx);
         let _enter = span.enter();
 
         // tracing::trace!(?transaction, "Estimating transaction");

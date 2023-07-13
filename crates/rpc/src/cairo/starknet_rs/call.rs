@@ -1,11 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use anyhow::Context;
-use pathfinder_common::{
-    BlockNumber, BlockTimestamp, CallParam, CallResultValue, ChainId, ContractAddress, EntryPoint,
-    SequencerAddress, StateUpdate,
-};
+use pathfinder_common::{CallParam, CallResultValue, ContractAddress, EntryPoint};
 use stark_hash::Felt;
 use starknet_in_rust::execution::execution_entry_point::ExecutionEntryPoint;
 use starknet_in_rust::execution::TransactionExecutionContext;
@@ -15,23 +11,17 @@ use starknet_in_rust::state::ExecutionResourcesManager;
 use starknet_in_rust::utils::Address;
 use starknet_in_rust::{felt::Felt252, EntryPointType};
 
-use super::{error::CallError, state_reader::PathfinderStateReader};
+use super::{error::CallError, state_reader::PathfinderStateReader, ExecutionState};
 
 pub fn call(
-    storage: pathfinder_storage::Storage,
-    chain_id: ChainId,
-    block_number: BlockNumber,
-    block_timestamp: BlockTimestamp,
-    sequencer_address: SequencerAddress,
-    state_at_block: Option<BlockNumber>,
+    execution_state: ExecutionState,
     contract_address: ContractAddress,
     entry_point_selector: EntryPoint,
     calldata: Vec<CallParam>,
-    pending_update: Option<Arc<StateUpdate>>,
 ) -> Result<Vec<CallResultValue>, CallError> {
     let state_reader = PathfinderStateReader {
-        storage,
-        block_number: state_at_block,
+        storage: execution_state.storage,
+        block_number: execution_state.state_at_block,
     };
 
     let contract_class_cache = HashMap::new();
@@ -42,7 +32,7 @@ pub fn call(
         Some(casm_class_cache),
     );
 
-    pending_update.map(|pending_update| {
+    execution_state.pending_update.map(|pending_update| {
         super::pending::apply_pending_update(&mut state, pending_update.as_ref())
     });
 
@@ -64,13 +54,7 @@ pub fn call(
         starknet_in_rust::definitions::constants::INITIAL_GAS_COST,
     );
 
-    let block_context = super::block_context::construct_block_context(
-        chain_id,
-        block_number,
-        block_timestamp,
-        sequencer_address,
-        1.into(),
-    )?;
+    let block_context = super::block_context::construct_block_context(&execution_state, 1.into())?;
 
     let mut execution_context = TransactionExecutionContext::new(
         caller_address,

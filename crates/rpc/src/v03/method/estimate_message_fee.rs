@@ -1,6 +1,7 @@
 use anyhow::Context;
 
 use crate::{
+    cairo::starknet_rs::ExecutionState,
     context::RpcContext,
     v02::{method::call::FunctionCall, types::reply::FeeEstimate},
 };
@@ -34,13 +35,12 @@ pub async fn estimate_message_fee(
     context: RpcContext,
     input: EstimateMessageFeeInput,
 ) -> Result<FeeEstimate, EstimateMessageFeeError> {
-    let (gas_price, at_block, _pending_timestamp, _pending_update) =
+    let (gas_price, at_block, pending_timestamp, pending_update) =
         crate::v03::method::common::prepare_block(&context, input.block_id).await?;
 
     let storage = context.storage.clone();
     let span = tracing::Span::current();
 
-    // FIXME: handle pending data
     let block = tokio::task::spawn_blocking(move || {
         let _g = span.enter();
 
@@ -62,14 +62,25 @@ pub async fn estimate_message_fee(
         crate::cairo::ext_py::GasPriceSource::Current(c) => c,
     };
 
+    let timestamp = pending_timestamp.unwrap_or(block.timestamp);
+
+    let execution_state = ExecutionState {
+        storage: context.storage,
+        chain_id: context.chain_id,
+        block_number: block.number,
+        block_timestamp: timestamp,
+        sequencer_address: block.sequencer_address,
+        state_at_block: Some(block.number),
+        pending_update,
+    };
+
+    let span = tracing::Span::current();
+
     let result = tokio::task::spawn_blocking(move || {
+        let _g = span.enter();
+
         let result = crate::cairo::starknet_rs::estimate_message_fee(
-            context.storage,
-            context.chain_id,
-            block.number,
-            block.timestamp,
-            block.sequencer_address,
-            Some(block.number),
+            execution_state,
             gas_price,
             input.message,
             input.sender_address,

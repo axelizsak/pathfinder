@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::context::RpcContext;
 use crate::felt::RpcFelt;
+use crate::{cairo::starknet_rs::ExecutionState, context::RpcContext};
 use anyhow::Context;
 use pathfinder_common::{
     BlockId, BlockTimestamp, CallParam, CallResultValue, ContractAddress, EntryPoint, StateUpdate,
@@ -92,17 +92,21 @@ pub async fn call(context: RpcContext, input: CallInput) -> Result<CallOutput, C
 
         let timestamp = pending_timestamp.unwrap_or(block.timestamp);
 
+        let execution_state = ExecutionState {
+            storage,
+            chain_id: context.chain_id,
+            block_number: block.number,
+            block_timestamp: timestamp,
+            sequencer_address: block.sequencer_address,
+            state_at_block: Some(block.number),
+            pending_update,
+        };
+
         let result = crate::cairo::starknet_rs::call(
-            context.storage,
-            context.chain_id,
-            block.number,
-            timestamp,
-            block.sequencer_address,
-            Some(block.number),
+            execution_state,
             input.request.contract_address,
             input.request.entry_point_selector,
             input.request.calldata,
-            pending_update,
         )?;
 
         Ok(result)
