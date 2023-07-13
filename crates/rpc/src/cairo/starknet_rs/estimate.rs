@@ -1,9 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use pathfinder_common::{
-    BlockNumber, BlockTimestamp, ChainId, EthereumAddress, SequencerAddress, StateUpdate,
-};
+use pathfinder_common::EthereumAddress;
 use primitive_types::U256;
 
 use stark_hash::Felt;
@@ -98,12 +95,12 @@ fn estimate_fee_impl(
     gas_price: U256,
     transactions: Vec<Transaction>,
 ) -> Result<Vec<FeeEstimate>, CallError> {
+    let block_context = construct_block_context(&execution_state, gas_price)?;
+
     let state_reader = PathfinderStateReader {
         storage: execution_state.storage,
         block_number: execution_state.state_at_block,
     };
-
-    let block_context = construct_block_context(&execution_state, gas_price)?;
 
     let contract_class_cache = HashMap::new();
     let casm_class_cache = HashMap::new();

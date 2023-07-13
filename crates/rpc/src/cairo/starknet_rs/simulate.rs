@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pathfinder_common::{BlockNumber, BlockTimestamp, ChainId, ContractAddress, SequencerAddress};
+use pathfinder_common::ContractAddress;
 use primitive_types::U256;
 
 use stark_hash::Felt;
@@ -24,6 +24,8 @@ pub fn simulate(
     transactions: Vec<BroadcastedTransaction>,
     skip_validate: bool,
 ) -> Result<Vec<TransactionSimulation>, CallError> {
+    let block_context = construct_block_context(&execution_state, gas_price)?;
+
     let transactions = transactions
         .into_iter()
         .map(|tx| map_broadcasted_transaction(tx, execution_state.chain_id))
@@ -33,8 +35,6 @@ pub fn simulate(
         storage: execution_state.storage,
         block_number: execution_state.state_at_block,
     };
-
-    let block_context = construct_block_context(&execution_state, gas_price)?;
 
     let contract_class_cache = HashMap::new();
     let casm_class_cache = HashMap::new();

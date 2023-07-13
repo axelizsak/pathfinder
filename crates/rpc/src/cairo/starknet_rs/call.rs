@@ -19,6 +19,8 @@ pub fn call(
     entry_point_selector: EntryPoint,
     calldata: Vec<CallParam>,
 ) -> Result<Vec<CallResultValue>, CallError> {
+    let block_context = super::block_context::construct_block_context(&execution_state, 1.into())?;
+
     let state_reader = PathfinderStateReader {
         storage: execution_state.storage,
         block_number: execution_state.state_at_block,
@@ -53,8 +55,6 @@ pub fn call(
         None,
         starknet_in_rust::definitions::constants::INITIAL_GAS_COST,
     );
-
-    let block_context = super::block_context::construct_block_context(&execution_state, 1.into())?;
 
     let mut execution_context = TransactionExecutionContext::new(
         caller_address,
