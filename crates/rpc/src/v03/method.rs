@@ -42,7 +42,7 @@ pub(crate) mod common {
         block_id: BlockId,
     ) -> Result<ExecutionState, ExecutionStateError> {
         let (gas_price, at_block, pending_timestamp, pending_update) =
-            crate::v03::method::common::prepare_block(&context, block_id).await?;
+            prepare_block(&context, block_id).await?;
 
         let storage = context.storage.clone();
         let span = tracing::Span::current();
@@ -121,7 +121,7 @@ pub(crate) mod common {
     }
 
     /// Transforms the request to call or estimate fee at some point in time to the type expected
-    /// by [`crate::cairo::ext_py`] with the optional, latest pending data.
+    /// by [`crate::cairo::starknet_rs`] with the optional, latest pending data.
     async fn base_block_and_pending_for_call(
         at_block: BlockId,
         pending_data: &Option<PendingData>,
