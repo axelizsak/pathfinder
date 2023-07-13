@@ -800,7 +800,7 @@ mod tests {
                         .unwrap()
                         .headers
                         .into_iter()
-                        .map(header::from_p2p).collect::<Vec<_>>();
+                        .map(header::try_from_p2p).collect::<anyhow::Result<Vec<_>>>().unwrap();
 
                     prop_assert_eq!(from_p2p, from_db)
                 }
@@ -826,7 +826,7 @@ mod tests {
                         .unwrap()
                         .headers
                         .into_iter()
-                        .map(header::from_p2p).collect::<Vec<_>>();
+                        .map(header::try_from_p2p).collect::<anyhow::Result<Vec<_>>>().unwrap();
 
                     prop_assert_eq!(from_p2p, from_db)
                 }
@@ -975,9 +975,9 @@ mod tests {
                         .block_state_updates
                         .into_iter()
                         .map(|state_update| {
-                            let (h, su) = state_diff::from_p2p(state_update);
-                            (h, StateDiff::from(su).sort())
-                        }).collect::<Vec<_>>();
+                            let (h, su) = state_diff::try_from_p2p(state_update)?;
+                            Ok((h, StateDiff::from(su).sort()))
+                        }).collect::<anyhow::Result<Vec<_>>>().unwrap();
 
                     prop_assert_eq!(from_p2p, from_db)
                 }
@@ -1014,9 +1014,9 @@ mod tests {
                         .block_state_updates
                         .into_iter()
                         .map(|state_update| {
-                            let (h, su) = state_diff::from_p2p(state_update);
-                            (h, StateDiff::from(su).sort())
-                        }).collect::<Vec<_>>();
+                            let (h, su) = state_diff::try_from_p2p(state_update)?;
+                            Ok((h, StateDiff::from(su).sort()))
+                        }).collect::<anyhow::Result<Vec<_>>>().unwrap();
 
                     prop_assert_eq!(from_p2p, from_db)
                 }
