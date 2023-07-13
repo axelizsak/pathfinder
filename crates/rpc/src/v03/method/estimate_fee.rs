@@ -170,7 +170,7 @@ mod tests {
 
         use crate::v02::types::request::{
             BroadcastedDeclareTransaction, BroadcastedDeclareTransactionV2,
-            BroadcastedDeployAccountTransaction, BroadcastedInvokeTransactionV1,
+            BroadcastedInvokeTransactionV1,
         };
         use crate::v02::types::{ContractClass, SierraContractClass};
 
