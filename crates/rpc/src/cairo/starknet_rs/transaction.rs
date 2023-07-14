@@ -207,13 +207,14 @@ pub(super) fn map_gateway_transaction(
 
                 let contract_class =
                     serde_json::from_slice::<FeederGatewayContractClass<'_>>(&contract_class)
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to parse gateway class definition: {}", e)
+                        .map_err(|error| {
+                            tracing::error!(class_hash=%tx.class_hash, %error, "Failed to parse gateway class definition");
+                            TransactionError::MissingCompiledClass
                         })?;
 
                 let abi: serde_json::Value = serde_json::from_str(contract_class.abi.as_ref())
                     .map_err(|error| {
-                        tracing::error!(%error, "Failed to parse Sierra class ABI");
+                        tracing::error!(class_hash=%tx.class_hash, %error, "Failed to parse Sierra class ABI");
                         TransactionError::MissingCompiledClass
                     })?;
 
@@ -226,8 +227,9 @@ pub(super) fn map_gateway_transaction(
 
                 let contract_class =
                     serde_json::from_value::<SierraContractClass>(compiler_contract_class_json)
-                        .map_err(|e| {
-                            anyhow::anyhow!("Failed to parse Sierra class definition: {}", e)
+                        .map_err(|error| {
+                            tracing::error!(class_hash=%tx.class_hash, %error, "Failed to parse Sierra class definition");
+                            TransactionError::MissingCompiledClass
                         })?;
 
                 let tx = DeclareV2::new_with_tx_hash(
