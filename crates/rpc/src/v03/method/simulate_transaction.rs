@@ -71,7 +71,7 @@ pub async fn simulate_transaction(
     Ok(SimulateTransactionOutput(txs))
 }
 
-pub mod dto {
+pub(crate) mod dto {
     use serde_with::serde_as;
 
     use crate::felt::RpcFelt;
@@ -101,7 +101,7 @@ pub mod dto {
         SkipValidate,
     }
 
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub enum CallType {
         #[serde(rename = "CALL")]
         Call,
@@ -119,7 +119,7 @@ pub mod dto {
         }
     }
 
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub enum EntryPointType {
         #[serde(rename = "CONSTRUCTOR")]
         Constructor,
@@ -142,7 +142,7 @@ pub mod dto {
 
     #[serde_with::serde_as]
     #[serde_with::skip_serializing_none]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct FunctionInvocation {
         #[serde(default)]
         pub call_type: Option<CallType>,
@@ -187,7 +187,7 @@ pub mod dto {
     }
 
     #[serde_with::serde_as]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct MsgToL1 {
         #[serde_as(as = "Vec<RpcFelt>")]
         pub payload: Vec<Felt>,
@@ -208,7 +208,7 @@ pub mod dto {
     }
 
     #[serde_with::serde_as]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct Event {
         #[serde_as(as = "Vec<RpcFelt>")]
         pub data: Vec<Felt>,
@@ -225,7 +225,7 @@ pub mod dto {
         }
     }
 
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     #[serde(untagged)]
     pub enum TransactionTrace {
         Declare(DeclareTxnTrace),
@@ -234,8 +234,20 @@ pub mod dto {
         L1Handler(L1HandlerTxnTrace),
     }
 
+    impl From<crate::cairo::starknet_rs::types::TransactionTrace> for TransactionTrace {
+        fn from(trace: crate::cairo::starknet_rs::types::TransactionTrace) -> Self {
+            use crate::cairo::starknet_rs::types::TransactionTrace::*;
+            match trace {
+                Declare(t) => Self::Declare(t.into()),
+                DeployAccount(t) => Self::DeployAccount(t.into()),
+                Invoke(t) => Self::Invoke(t.into()),
+                L1Handler(t) => Self::L1Handler(t.into()),
+            }
+        }
+    }
+
     #[serde_with::skip_serializing_none]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct DeclareTxnTrace {
         #[serde(default)]
         pub fee_transfer_invocation: Option<FunctionInvocation>,
@@ -253,7 +265,7 @@ pub mod dto {
     }
 
     #[serde_with::skip_serializing_none]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct DeployAccountTxnTrace {
         #[serde(default)]
         pub constructor_invocation: Option<FunctionInvocation>,
@@ -276,7 +288,7 @@ pub mod dto {
     }
 
     #[serde_with::skip_serializing_none]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct InvokeTxnTrace {
         #[serde(default)]
         pub validate_invocation: Option<FunctionInvocation>,
@@ -297,7 +309,7 @@ pub mod dto {
     }
 
     #[serde_with::skip_serializing_none]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct L1HandlerTxnTrace {
         #[serde(default)]
         pub function_invocation: Option<FunctionInvocation>,
@@ -311,20 +323,8 @@ pub mod dto {
         }
     }
 
-    impl From<crate::cairo::starknet_rs::types::TransactionTrace> for TransactionTrace {
-        fn from(trace: crate::cairo::starknet_rs::types::TransactionTrace) -> Self {
-            use crate::cairo::starknet_rs::types::TransactionTrace::*;
-            match trace {
-                Declare(t) => Self::Declare(t.into()),
-                DeployAccount(t) => Self::DeployAccount(t.into()),
-                Invoke(t) => Self::Invoke(t.into()),
-                L1Handler(t) => Self::L1Handler(t.into()),
-            }
-        }
-    }
-
     #[serde_with::skip_serializing_none]
-    #[derive(Debug, Deserialize, Serialize, Eq, PartialEq)]
+    #[derive(Debug, Serialize, Eq, PartialEq)]
     pub struct SimulatedTransaction {
         pub fee_estimation: FeeEstimate,
         pub transaction_trace: TransactionTrace,
