@@ -16,13 +16,7 @@ pub(crate) mod common {
     use pathfinder_common::{BlockId, BlockTimestamp, StateUpdate};
     use starknet_gateway_types::pending::PendingData;
 
-    use crate::{
-        cairo::{
-            ext_py::{BlockHashNumberOrLatest, GasPriceSource},
-            starknet_rs::ExecutionState,
-        },
-        context::RpcContext,
-    };
+    use crate::{cairo::starknet_rs::ExecutionState, context::RpcContext};
 
     use anyhow::Context;
 
@@ -64,8 +58,8 @@ pub(crate) mod common {
         .context("Getting block")??;
 
         let gas_price = match gas_price {
-            crate::cairo::ext_py::GasPriceSource::PastBlock => block.gas_price.0.into(),
-            crate::cairo::ext_py::GasPriceSource::Current(c) => c,
+            GasPriceSource::PastBlock => block.gas_price.0.into(),
+            GasPriceSource::Current(c) => c,
         };
 
         let timestamp = pending_timestamp.unwrap_or(block.timestamp);
@@ -89,7 +83,7 @@ pub(crate) mod common {
         block_id: BlockId,
     ) -> anyhow::Result<(
         GasPriceSource,
-        BlockHashNumberOrLatest,
+        pathfinder_storage::BlockId,
         Option<BlockTimestamp>,
         Option<Arc<StateUpdate>>,
     )> {
@@ -120,6 +114,17 @@ pub(crate) mod common {
         Ok((gas_price, when, pending_timestamp, pending_update))
     }
 
+    /// Where should the call code get the used `BlockInfo::gas_price`
+    pub enum GasPriceSource {
+        /// Use gasPrice recorded on the `starknet_blocks::gas_price`.
+        ///
+        /// This is not implied by other arguments such as `at_block` because we might need to
+        /// manufacture a block hash for some future use cases.
+        PastBlock,
+        /// Use this latest value from `eth_gasPrice`.
+        Current(primitive_types::U256),
+    }
+
     /// Transforms the request to call or estimate fee at some point in time to the type expected
     /// by [`crate::cairo::starknet_rs`] with the optional, latest pending data.
     async fn base_block_and_pending_for_call(
@@ -127,17 +132,17 @@ pub(crate) mod common {
         pending_data: &Option<PendingData>,
     ) -> Result<
         (
-            BlockHashNumberOrLatest,
+            pathfinder_storage::BlockId,
             Option<BlockTimestamp>,
             Option<Arc<StateUpdate>>,
         ),
         anyhow::Error,
     > {
-        use crate::cairo::ext_py::Pending;
-
-        match BlockHashNumberOrLatest::try_from(at_block) {
-            Ok(when) => Ok((when, None, None)),
-            Err(Pending) => {
+        match at_block {
+            BlockId::Number(n) => Ok((n.into(), None, None)),
+            BlockId::Hash(h) => Ok((h.into(), None, None)),
+            BlockId::Latest => Ok((pathfinder_storage::BlockId::Latest, None, None)),
+            BlockId::Pending => {
                 // we must have pending_data configured for pending requests, otherwise we fail
                 // fast.
                 match pending_data {
@@ -153,7 +158,7 @@ pub(crate) mod common {
 
                         // if there is no pending data available, just execute on whatever latest.
                         Ok(pending_on_top_of_a_block.unwrap_or((
-                            BlockHashNumberOrLatest::Latest,
+                            pathfinder_storage::BlockId::Latest,
                             None,
                             None,
                         )))
