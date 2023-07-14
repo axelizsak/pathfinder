@@ -105,6 +105,10 @@ fn estimate_fee_impl(
         Some(casm_class_cache),
     );
 
+    execution_state.pending_update.map(|pending_update| {
+        super::pending::apply_pending_update(&mut cached_state, pending_update.as_ref())
+    });
+
     let mut fees = Vec::with_capacity(transactions.len());
     for (transaction_idx, transaction) in transactions.iter().enumerate() {
         let span = tracing::debug_span!("execute", transaction_hash=%super::transaction::transaction_hash(transaction), block_number=%execution_state.block_number, %transaction_idx);
