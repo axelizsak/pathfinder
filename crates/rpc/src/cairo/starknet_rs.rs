@@ -7,6 +7,7 @@ mod simulate;
 mod state;
 mod state_reader;
 mod transaction;
+pub(crate) mod types;
 
 pub use call::call;
 pub use error::CallError;

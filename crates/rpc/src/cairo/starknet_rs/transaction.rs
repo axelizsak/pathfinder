@@ -98,6 +98,8 @@ pub(super) fn map_broadcasted_transaction(
                     tx.nonce.0.into(),
                 )?;
 
+                tracing::error!(class_hash=%tx.sierra_class_hash, "XXX class_hash");
+
                 Ok(Transaction::DeclareV2(tx.into()))
             }
         },

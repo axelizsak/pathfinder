@@ -1,7 +1,7 @@
 use anyhow::Context;
 
 use crate::{
-    cairo::ext_py::types::FeeEstimate, context::RpcContext,
+    cairo::starknet_rs::types::FeeEstimate, context::RpcContext,
     v02::types::request::BroadcastedTransaction,
 };
 use pathfinder_common::BlockId;

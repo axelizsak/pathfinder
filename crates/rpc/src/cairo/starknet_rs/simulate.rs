@@ -1,21 +1,20 @@
 use std::collections::HashMap;
 
-use pathfinder_common::ContractAddress;
 use primitive_types::U256;
 
-use stark_hash::Felt;
 use starknet_in_rust::state::cached_state::CachedState;
 use starknet_in_rust::transaction::error::TransactionError;
 use starknet_in_rust::transaction::Transaction;
 
-use crate::cairo::ext_py::types::{
-    CallType, Event, FeeEstimate, FunctionInvocation, TransactionSimulation, TransactionTrace,
+use crate::cairo::starknet_rs::types::{
+    DeclareTransactionTrace, DeployAccountTransactionTrace, InvokeTransactionTrace,
+    L1HandlerTransactionTrace,
 };
 use crate::v02::types::request::BroadcastedTransaction;
-use crate::v03::method::simulate_transaction::dto::{EntryPointType, MsgToL1};
 
 use super::state_reader::PathfinderStateReader;
 use super::transaction::map_broadcasted_transaction;
+use super::types::{FeeEstimate, TransactionSimulation, TransactionTrace};
 use super::{block_context::construct_block_context, error::CallError, ExecutionState};
 
 pub fn simulate(
@@ -80,6 +79,7 @@ fn to_trace(
     transaction: &Transaction,
     execution_info: starknet_in_rust::execution::TransactionExecutionInfo,
 ) -> Result<TransactionTrace, TransactionError> {
+    tracing::warn!(?execution_info, "Transforming trace");
     let validate_invocation = execution_info
         .validate_info
         .map(TryInto::try_into)
@@ -93,103 +93,32 @@ fn to_trace(
         .map(TryInto::try_into)
         .transpose()?;
 
-    Ok(TransactionTrace {
-        validate_invocation,
-        function_invocation,
-        fee_transfer_invocation,
-        signature: tx_signature(transaction),
-    })
-}
-
-fn tx_signature(transaction: &Transaction) -> Vec<Felt> {
-    let signature = match transaction {
-        Transaction::Declare(tx) => tx.signature.as_slice(),
-        Transaction::DeclareV2(tx) => tx.signature.as_slice(),
-        Transaction::Deploy(_) => &[],
-        Transaction::DeployAccount(tx) => tx.signature().as_slice(),
-        Transaction::InvokeFunction(tx) => tx.signature().as_slice(),
-        Transaction::L1Handler(_) => &[],
+    let trace = match transaction {
+        Transaction::Declare(_) | Transaction::DeclareV2(_) => {
+            TransactionTrace::Declare(DeclareTransactionTrace {
+                validate_invocation,
+                fee_transfer_invocation,
+            })
+        }
+        Transaction::Deploy(_) => {
+            panic!("Internal error, no deploy transactions are possible here")
+        }
+        Transaction::DeployAccount(_) => {
+            TransactionTrace::DeployAccount(DeployAccountTransactionTrace {
+                validate_invocation,
+                constructor_invocation: function_invocation,
+                fee_transfer_invocation,
+            })
+        }
+        Transaction::InvokeFunction(_) => TransactionTrace::Invoke(InvokeTransactionTrace {
+            validate_invocation,
+            execute_invocation: function_invocation,
+            fee_transfer_invocation,
+        }),
+        Transaction::L1Handler(_) => TransactionTrace::L1Handler(L1HandlerTransactionTrace {
+            function_invocation,
+        }),
     };
 
-    signature.iter().cloned().map(Into::into).collect()
-}
-
-impl TryFrom<starknet_in_rust::execution::CallInfo> for FunctionInvocation {
-    type Error = TransactionError;
-
-    fn try_from(call_info: starknet_in_rust::execution::CallInfo) -> Result<Self, Self::Error> {
-        let messages = call_info
-            .get_sorted_l2_to_l1_messages()?
-            .into_iter()
-            .map(Into::into)
-            .collect();
-
-        let internal_calls = call_info
-            .internal_calls
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let events = call_info.events.into_iter().map(Into::into).collect();
-
-        let result = call_info.retdata.into_iter().map(Into::into).collect();
-
-        Ok(Self {
-            calldata: call_info.calldata.into_iter().map(Into::into).collect(),
-            contract_address: ContractAddress::new_or_panic(call_info.contract_address.0.into()),
-            selector: call_info
-                .entry_point_selector
-                .map(|s| s.into())
-                .unwrap_or(Felt::ZERO),
-            call_type: call_info.call_type.map(Into::into),
-            caller_address: Some(call_info.caller_address.0.into()),
-            internal_calls: Some(internal_calls),
-            class_hash: call_info
-                .class_hash
-                .and_then(|class_hash| Felt::from_be_bytes(class_hash).ok()),
-            entry_point_type: call_info.entry_point_type.map(Into::into),
-            events: Some(events),
-            messages: Some(messages),
-            result: Some(result),
-        })
-    }
-}
-
-impl From<starknet_in_rust::execution::CallType> for CallType {
-    fn from(value: starknet_in_rust::execution::CallType) -> Self {
-        match value {
-            starknet_in_rust::execution::CallType::Call => CallType::Call,
-            starknet_in_rust::execution::CallType::Delegate => CallType::Delegate,
-        }
-    }
-}
-
-impl From<starknet_in_rust::services::api::contract_classes::deprecated_contract_class::EntryPointType> for EntryPointType {
-    fn from(value: starknet_in_rust::services::api::contract_classes::deprecated_contract_class::EntryPointType) -> Self {
-        match value {
-            starknet_in_rust::EntryPointType::External => EntryPointType::External,
-            starknet_in_rust::EntryPointType::L1Handler => EntryPointType::L1Handler,
-            starknet_in_rust::EntryPointType::Constructor => EntryPointType::Constructor,
-        }
-    }
-}
-
-impl From<starknet_in_rust::execution::OrderedEvent> for Event {
-    fn from(value: starknet_in_rust::execution::OrderedEvent) -> Self {
-        Self {
-            order: value.order as i64,
-            data: value.data.into_iter().map(Into::into).collect(),
-            keys: value.keys.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<starknet_in_rust::execution::L2toL1MessageInfo> for MsgToL1 {
-    fn from(value: starknet_in_rust::execution::L2toL1MessageInfo) -> Self {
-        Self {
-            payload: value.payload.into_iter().map(Into::into).collect(),
-            to_address: value.to_address.0.into(),
-            from_address: value.from_address.0.into(),
-        }
-    }
+    Ok(trace)
 }

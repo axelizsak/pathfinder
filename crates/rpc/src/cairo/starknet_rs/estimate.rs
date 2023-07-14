@@ -13,10 +13,9 @@ use starknet_in_rust::transaction::{L1Handler, Transaction};
 use crate::v02::method::call::FunctionCall;
 use crate::v02::types::request::BroadcastedTransaction;
 
-use crate::cairo::ext_py::types::FeeEstimate;
-
 use super::state_reader::PathfinderStateReader;
 use super::transaction::{map_broadcasted_transaction, map_gateway_transaction};
+use super::types::FeeEstimate;
 use super::{block_context::construct_block_context, error::CallError, ExecutionState};
 
 pub fn estimate_fee(
